@@ -205,29 +205,31 @@ export default function MoriPage() {
                 )}
               </p>
 
-              {/* Grid fluido (columnas 1fr, nunca px fijo) — cada celda ocupa
-                  exactamente el ancho disponible del contenedor, así que
-                  53 semanas × ~90 años entran siempre sin scroll horizontal,
-                  en mobile o PC, sin importar el viewport. `max-w` evita que
-                  las celdas se vuelvan bloques enormes en pantallas anchas. */}
-              <div className="rounded-3xl border border-border bg-card p-3">
-                <div className="mx-auto flex max-w-[420px] flex-col gap-[1.5px]">
+              {/* Celda de tamaño FIJO (nunca fraccional/1fr): con columnas
+                  fraccionarias cada celda redondeaba su ancho en píxeles de
+                  forma independiente, y el conjunto se veía como ruido en
+                  vez de una cuadrícula prolija. Un tamaño fijo (4px) da
+                  cuadraditos uniformes de verdad. Para que 53 semanas
+                  quepan sin scroll horizontal, el espacio se recupera
+                  achicando el padding de la card y el gap entre elementos
+                  — no encogiendo más las celdas. 53×4px + 52×1px de gap +
+                  la etiqueta de año ≈ 280px, entra hasta en el mobile más
+                  angosto. */}
+              <div className="rounded-3xl border border-border bg-card p-2">
+                <div className="mx-auto flex w-fit flex-col gap-px">
                   {weekRows.map((row) => (
                     <div key={row.year} className="flex items-center gap-1">
-                      <span className="w-5 shrink-0 text-right text-[9px] leading-none text-muted-foreground">
+                      <span className="w-4 shrink-0 text-right text-[8px] leading-none text-muted-foreground">
                         {String(row.year).slice(2)}
                       </span>
-                      <div
-                        className="grid flex-1 gap-[1px]"
-                        style={{ gridTemplateColumns: `repeat(${WEEKS_PER_ROW}, minmax(0, 1fr))` }}
-                      >
+                      <div className="flex gap-px">
                         {row.weeks.map((cell, i) => (
                           <Cell
                             key={i}
                             score={cell.score}
                             isFuture={cell.isFuture}
                             title={`${row.year} · semana ${i + 1}`}
-                            className="aspect-square rounded-[1px]"
+                            className="size-1 shrink-0 rounded-[1px]"
                           />
                         ))}
                       </div>

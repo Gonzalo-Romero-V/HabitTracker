@@ -14,35 +14,12 @@ type ViewMode = "mensual" | "anual";
 
 type MetricPoint = { date: string; value: number };
 
-/** Valor de la meta (`target_value`) vigente en `date`, replicando en JS el
- * criterio de `HabitMetric::targetVersionEffectiveOn` del backend: la
- * versión con `effective_from` más reciente que sea <= date. Nunca usar
- * `metric.target_value` (el vigente HOY) para una serie histórica — la
- * meta puede haber cambiado de valor en el pasado (domain/habit-metric.md).
- * `target_versions` ya viene ordenado ascendente por effective_from, así
- * que basta con quedarse con la última que todavía cumple la condición. */
-function targetValueEffectiveOn(metric: HabitMetric, date: string): number | null {
-  let effective: string | null = null;
-  // Defensivo: un backend todavía no migrado a target_versions dejaría
-  // este campo undefined — nunca debe tirar abajo toda la pantalla de
-  // Análisis por eso (ver DEPLOY.md, la API de la app instalada puede
-  // apuntar a un backend que no recibió el último despliegue todavía).
-  for (const version of metric.target_versions ?? []) {
-    if (version.effective_from <= date) {
-      effective = version.target_value;
-    }
-  }
-  return effective === null ? null : fromStoredTargetValue(metric.metric_type, Number(effective));
-}
-
-/** Serie de valor real (Serie 1) + serie de meta vigente por fecha (Serie
- * 2, función escalonada) para una métrica cuantificable, sobre las mismas
- * fechas en las que hay un log con esa métrica. */
-function buildMetricSeries(
-  metric: HabitMetric,
-  logs: HabitLogEntry[],
-): { valuePoints: MetricPoint[]; targetPoints: MetricPoint[] } {
-  const valuePoints = logs
+/** Serie de valor real para una métrica cuantificable — un punto por log
+ * que trae un valor de esta métrica. Posicionada por FECHA real (no por
+ * índice): registros irregularmente espaciados en el tiempo no deben verse
+ * como si estuvieran a intervalos iguales. */
+function buildValuePoints(metric: HabitMetric, logs: HabitLogEntry[]): MetricPoint[] {
+  return logs
     .map((log) => {
       const entry = log.metrics.find((m) => m.habit_metric_id === metric.id);
       if (!entry) return null;
@@ -50,15 +27,6 @@ function buildMetricSeries(
     })
     .filter((p): p is MetricPoint => p !== null)
     .sort((a, b) => a.date.localeCompare(b.date));
-
-  const targetPoints = valuePoints
-    .map((p) => {
-      const value = targetValueEffectiveOn(metric, p.date);
-      return value === null ? null : { date: p.date, value };
-    })
-    .filter((p): p is MetricPoint => p !== null);
-
-  return { valuePoints, targetPoints };
 }
 
 function metricUnitLabel(metric: HabitMetric): string | null {
@@ -67,13 +35,63 @@ function metricUnitLabel(metric: HabitMetric): string | null {
   return "min";
 }
 
+function clamp01(t: number): number {
+  return Math.min(1, Math.max(0, t));
+}
+
+/** Puntos de la línea de meta (función escalonada) como REFERENCIA
+ * continua a través de todo el rango visible — nunca atada a las fechas
+ * exactas donde hay un valor logueado. Mismo patrón que un threshold line
+ * de Grafana/Datadog: cruza todo el ancho del gráfico, independiente de
+ * cuántos puntos de datos reales existan (con un solo registro, por
+ * ejemplo, antes esto no dibujaba nada — un <polyline> de un punto no
+ * traza ningún segmento). */
+function buildTargetStepPoints(
+  metric: HabitMetric,
+  domainStartMs: number,
+  domainEndMs: number,
+  toX: (t: number) => number,
+  toY: (value: number) => number,
+): string {
+  const versions = (metric.target_versions ?? [])
+    .map((v) => ({ ms: new Date(v.effective_from).getTime(), value: fromStoredTargetValue(metric.metric_type, Number(v.target_value)) }))
+    .sort((a, b) => a.ms - b.ms);
+
+  if (versions.length === 0) return "";
+
+  const span = domainEndMs - domainStartMs || 1;
+  const xForMs = (ms: number) => toX(clamp01((ms - domainStartMs) / span));
+
+  // Nivel vigente al INICIO del rango visible — la última versión con
+  // effective_from <= domainStartMs, o la primera versión que exista si
+  // todas son posteriores (mejor mostrar la meta más antigua conocida que
+  // no mostrar nada).
+  let currentValue = versions[0].value;
+  for (const v of versions) {
+    if (v.ms <= domainStartMs) currentValue = v.value;
+  }
+
+  const points: string[] = [`${toX(0)},${toY(currentValue)}`];
+  for (const v of versions) {
+    if (v.ms <= domainStartMs || v.ms > domainEndMs) continue;
+    const x = xForMs(v.ms);
+    points.push(`${x},${toY(currentValue)}`); // tramo horizontal hasta la transición
+    currentValue = v.value;
+    points.push(`${x},${toY(currentValue)}`); // salto vertical al nuevo nivel
+  }
+  points.push(`${toX(1)},${toY(currentValue)}`); // tramo horizontal hasta el final del rango
+
+  return points.join(" ");
+}
+
 /** Mini-gráfico de línea (small multiple) para una métrica cuantificable:
- * valor real logueado (línea sólida) + meta vigente en cada fecha (línea
- * punteada, escalonada) — nunca combinadas con otra métrica en el mismo
- * eje (unidades/escalas distintas, ver skill dataviz). SVG artesanal,
- * consistente con el resto de esta pantalla (sin librería de charting). */
+ * valor real logueado (línea sólida + marcadores) + meta vigente (línea
+ * punteada, escalonada, siempre visible como referencia completa) — nunca
+ * combinadas con otra métrica en el mismo eje (unidades/escalas distintas,
+ * ver skill dataviz). SVG artesanal, consistente con el resto de esta
+ * pantalla (sin librería de charting). */
 function MetricEvolutionMiniChart({ metric, logs }: { metric: HabitMetric; logs: HabitLogEntry[] }) {
-  const { valuePoints, targetPoints } = buildMetricSeries(metric, logs);
+  const valuePoints = buildValuePoints(metric, logs);
   const unit = metricUnitLabel(metric);
 
   if (valuePoints.length === 0) {
@@ -88,24 +106,29 @@ function MetricEvolutionMiniChart({ metric, logs }: { metric: HabitMetric; logs:
     );
   }
 
-  const allValues = [...valuePoints.map((p) => p.value), ...targetPoints.map((p) => p.value)];
+  const n = valuePoints.length;
+  // Con un solo registro no hay un rango de fechas real que mapear — se
+  // arma una ventana artificial de +-3 días alrededor para que la línea de
+  // meta tenga un ancho visible en vez de colapsar a un punto.
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const domainStartMs =
+    n === 1 ? new Date(valuePoints[0].date).getTime() - 3 * oneDayMs : new Date(valuePoints[0].date).getTime();
+  const domainEndMs =
+    n === 1 ? new Date(valuePoints[0].date).getTime() + 3 * oneDayMs : new Date(valuePoints[n - 1].date).getTime();
+  const domainSpan = domainEndMs - domainStartMs || 1;
+
+  const targetLevels = (metric.target_versions ?? []).map((v) => fromStoredTargetValue(metric.metric_type, Number(v.target_value)));
+  const allValues = [...valuePoints.map((p) => p.value), ...targetLevels];
   const min = Math.min(...allValues);
   const max = Math.max(...allValues);
   const range = max - min || 1;
 
-  const n = valuePoints.length;
-  const toX = (i: number) => (n === 1 ? 150 : (i / (n - 1)) * 280 + 10);
+  const toX = (t: number) => t * 280 + 10;
   const toY = (value: number) => 90 - ((value - min) / range) * 80;
+  const xForDate = (date: string) => toX(clamp01((new Date(date).getTime() - domainStartMs) / domainSpan));
 
-  const dateIndex = new Map(valuePoints.map((p, i) => [p.date, i]));
-  const valuePath = valuePoints.map((p, i) => `${toX(i)},${toY(p.value)}`).join(" ");
-  const targetPath = targetPoints
-    .map((p) => {
-      const i = dateIndex.get(p.date);
-      return i === undefined ? null : `${toX(i)},${toY(p.value)}`;
-    })
-    .filter((point): point is string => point !== null)
-    .join(" ");
+  const valuePath = valuePoints.map((p) => `${xForDate(p.date)},${toY(p.value)}`).join(" ");
+  const targetPath = buildTargetStepPoints(metric, domainStartMs, domainEndMs, toX, toY);
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-secondary/40 p-3">
@@ -126,15 +149,30 @@ function MetricEvolutionMiniChart({ metric, logs }: { metric: HabitMetric; logs:
             vectorEffect="non-scaling-stroke"
           />
         )}
-        <polyline
-          points={valuePath}
-          fill="none"
-          stroke="var(--primary)"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
+        {valuePoints.length > 1 && (
+          <polyline
+            points={valuePath}
+            fill="none"
+            stroke="var(--primary)"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {/* Marcadores en cada punto real — sin esto, un registro aislado (o
+            los extremos de cualquier serie) no se ve, ver anti-patrón de
+            "single data point" en gráficos de línea. */}
+        {valuePoints.map((p) => (
+          <circle
+            key={p.date}
+            cx={xForDate(p.date)}
+            cy={toY(p.value)}
+            r={3}
+            fill="var(--primary)"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
       </svg>
     </div>
   );

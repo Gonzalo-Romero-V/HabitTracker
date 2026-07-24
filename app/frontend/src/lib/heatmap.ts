@@ -45,6 +45,10 @@ export function scoreToColor(score: number | null): string {
 }
 
 export function statToScore(dueCount: number, completedCount: number): number | null {
-  if (dueCount === 0) return null;
-  return Math.round((completedCount / dueCount) * 100);
+  if (!dueCount) return null;
+  const score = Math.round((completedCount / dueCount) * 100);
+  // Nunca dejar escapar un NaN hacia el render — un valor no numérico acá
+  // (ej. un campo faltante en una respuesta vieja de la API) debe leerse
+  // como "sin dato", nunca como el string literal "NaN%" en pantalla.
+  return Number.isFinite(score) ? score : null;
 }
