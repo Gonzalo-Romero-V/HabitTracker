@@ -1,15 +1,19 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Plus, X } from "lucide-react";
 import {
   createHabit,
   updateHabit,
   deleteHabit,
   archiveHabit,
   unarchiveHabit,
+  createHabitMetric,
   updateHabitMetric,
+  deleteHabitMetric,
   type Habit,
   type NewMetricInput,
+  type DurationType,
 } from "@/hooks/useHabits";
 import { useCategories } from "@/hooks/useCategories";
 import { useCategoryForm } from "@/components/custom/CategoryFormProvider";
@@ -45,17 +49,30 @@ import { cn } from "@/lib/utils";
 type TrackingType = "binary" | "quantifiable";
 type RecurrenceType = "fixed" | "quota";
 
+/** Una fila de métrica en el formulario. `id` presente = ya existe en el
+ * backend; ausente = fila nueva agregada en esta sesión de edición (ver
+ * domain/habit-metric.md — un hábito quantifiable puede tener N métricas). */
+type MetricRow = {
+  id?: number;
+  name: string;
+  metric_type: NewMetricInput["metric_type"];
+  unit: string;
+  goal: number;
+};
+
+const emptyMetricRow: MetricRow = { name: "", metric_type: "count", unit: "", goal: 1 };
+
 type FormState = {
   name: string;
   categoryId: string;
   trackingType: TrackingType;
-  metricType: NewMetricInput["metric_type"];
-  metricName: string;
-  metricUnit: string;
-  metricGoal: number;
+  metrics: MetricRow[];
   recurrenceType: RecurrenceType;
   days: string[];
   timesPerWeek: number;
+  durationType: DurationType;
+  durationEndDate: string;
+  durationDays: number;
   reminderOn: boolean;
   reminderTime: string;
 };
@@ -64,13 +81,13 @@ const emptyForm: FormState = {
   name: "",
   categoryId: "",
   trackingType: "binary",
-  metricType: "count",
-  metricName: "",
-  metricUnit: "",
-  metricGoal: 1,
+  metrics: [{ ...emptyMetricRow }],
   recurrenceType: "fixed",
   days: DAYS.map((d) => d.value),
   timesPerWeek: 3,
+  durationType: "indefinite",
+  durationEndDate: "",
+  durationDays: 30,
   reminderOn: false,
   reminderTime: "08:00",
 };
@@ -119,6 +136,21 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
     }));
   }
 
+  function updateMetricRow(index: number, patch: Partial<MetricRow>) {
+    setForm((prev) => ({
+      ...prev,
+      metrics: prev.metrics.map((m, i) => (i === index ? { ...m, ...patch } : m)),
+    }));
+  }
+
+  function addMetricRow() {
+    setForm((prev) => ({ ...prev, metrics: [...prev.metrics, { ...emptyMetricRow }] }));
+  }
+
+  function removeMetricRow(index: number) {
+    setForm((prev) => ({ ...prev, metrics: prev.metrics.filter((_, i) => i !== index) }));
+  }
+
   function openNew() {
     setEditing(null);
     setExistingReminderId(null);
@@ -129,18 +161,26 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
 
   function openEdit(habit: Habit) {
     setEditing(habit);
-    const metric = habit.metrics[0];
     setForm({
       name: habit.name,
       categoryId: habit.category_id ? String(habit.category_id) : "",
       trackingType: habit.tracking_type,
-      metricType: metric?.metric_type ?? "count",
-      metricName: metric?.name ?? "",
-      metricUnit: metric?.unit ?? "",
-      metricGoal: metric ? fromStoredTargetValue(metric.metric_type, Number(metric.target_value ?? 0)) : 1,
+      metrics:
+        habit.metrics.length > 0
+          ? habit.metrics.map((m) => ({
+              id: m.id,
+              name: m.name,
+              metric_type: m.metric_type,
+              unit: m.metric_type === "currency" ? (m.currency_code ?? "") : (m.unit ?? ""),
+              goal: fromStoredTargetValue(m.metric_type, Number(m.target_value ?? 0)),
+            }))
+          : [{ ...emptyMetricRow }],
       recurrenceType: habit.recurrence_type,
       days: habit.recurrence_rule ? parseRecurrenceRule(habit.recurrence_rule) : DAYS.map((d) => d.value),
       timesPerWeek: habit.quota_target ?? 3,
+      durationType: habit.duration_type,
+      durationEndDate: habit.duration_end_date ?? "",
+      durationDays: habit.duration_days ?? 30,
       reminderOn: false,
       reminderTime: "08:00",
     });
@@ -172,6 +212,66 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /** Solo el campo de vigencia que corresponde al `durationType` elegido —
+   * el backend rechaza con 422 (`prohibited_unless`) si se manda el campo
+   * que no corresponde al tipo. */
+  function durationFields(): {
+    duration_type: DurationType;
+    duration_end_date?: string;
+    duration_days?: number;
+  } {
+    if (form.durationType === "end_date") {
+      return { duration_type: "end_date", duration_end_date: form.durationEndDate };
+    }
+    if (form.durationType === "duration_days") {
+      return { duration_type: "duration_days", duration_days: form.durationDays };
+    }
+    return { duration_type: "indefinite" };
+  }
+
+  function metricPayload(m: MetricRow) {
+    return {
+      name: m.name,
+      metric_type: m.metric_type,
+      unit: m.metric_type === "count" ? m.unit : undefined,
+      currency_code: m.metric_type === "currency" ? m.unit.toUpperCase() : undefined,
+      target_value: toStoredTargetValue(m.metric_type, m.goal),
+    };
+  }
+
+  /** Diff entre `editing.metrics` (estado original al abrir el modal) y
+   * `form.metrics` (estado actual) — crea/actualiza/elimina solo lo que
+   * cambió (ver domain/habit-metric.md — N métricas por hábito). */
+  async function syncMetrics(habitId: number) {
+    if (!editing) return;
+
+    const originalMetrics = editing.metrics;
+    const currentIds = new Set(
+      form.metrics.filter((m): m is MetricRow & { id: number } => m.id != null).map((m) => m.id),
+    );
+
+    const toDelete = originalMetrics.filter((m) => !currentIds.has(m.id));
+    const toCreate = form.metrics.filter((m) => m.id == null);
+    const toUpdate = form.metrics.filter((m) => {
+      if (m.id == null) return false;
+      const original = originalMetrics.find((om) => om.id === m.id);
+      if (!original) return false;
+      const originalGoal = fromStoredTargetValue(original.metric_type, Number(original.target_value ?? 0));
+      return original.name !== m.name || originalGoal !== m.goal;
+    });
+
+    await Promise.all([
+      ...toDelete.map((m) => deleteHabitMetric(habitId, m.id)),
+      ...toCreate.map((m) => createHabitMetric(habitId, metricPayload(m))),
+      ...toUpdate.map((m) =>
+        updateHabitMetric(habitId, m.id as number, {
+          name: m.name,
+          target_value: toStoredTargetValue(m.metric_type, m.goal),
+        }),
+      ),
+    ]);
+  }
+
   async function handleSave() {
     setError(null);
     setIsSubmitting(true);
@@ -184,14 +284,11 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
           recurrence_rule: form.recurrenceType === "fixed" ? buildRecurrenceRule(form.days) : undefined,
           quota_target: form.recurrenceType === "quota" ? form.timesPerWeek : undefined,
           quota_period: form.recurrenceType === "quota" ? "week" : undefined,
+          ...durationFields(),
         });
 
-        const metric = editing.metrics[0];
-        if (form.trackingType === "quantifiable" && metric) {
-          await updateHabitMetric(editing.id, metric.id, {
-            name: form.metricName,
-            target_value: toStoredTargetValue(form.metricType, form.metricGoal),
-          });
+        if (form.trackingType === "quantifiable") {
+          await syncMetrics(editing.id);
         }
 
         await syncReminder(editing.id);
@@ -204,18 +301,8 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
           recurrence_rule: form.recurrenceType === "fixed" ? buildRecurrenceRule(form.days) : undefined,
           quota_target: form.recurrenceType === "quota" ? form.timesPerWeek : undefined,
           quota_period: form.recurrenceType === "quota" ? "week" : undefined,
-          metrics:
-            form.trackingType === "quantifiable"
-              ? [
-                  {
-                    name: form.metricName,
-                    metric_type: form.metricType,
-                    unit: form.metricType === "count" ? form.metricUnit : undefined,
-                    currency_code: form.metricType === "currency" ? form.metricUnit.toUpperCase() : undefined,
-                    target_value: toStoredTargetValue(form.metricType, form.metricGoal),
-                  },
-                ]
-              : undefined,
+          ...durationFields(),
+          metrics: form.trackingType === "quantifiable" ? form.metrics.map(metricPayload) : undefined,
         });
 
         if (form.reminderOn) {
@@ -338,54 +425,79 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
             </div>
 
             {form.trackingType === "quantifiable" && (
-              <div className="flex flex-col gap-2 rounded-md border border-border p-3">
-                <Input
-                  placeholder="Nombre de la métrica (ej. Páginas leídas)"
-                  required
-                  value={form.metricName}
-                  onChange={(e) => set("metricName", e.target.value)}
-                />
-                <Select
-                  value={form.metricType}
-                  onValueChange={(v) => set("metricType", v as NewMetricInput["metric_type"])}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="count">Cantidad (conteo)</SelectItem>
-                    <SelectItem value="duration">Duración (minutos)</SelectItem>
-                    <SelectItem value="currency">Monto (dinero)</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">{METRIC_TYPE_INFO[form.metricType].help}</p>
-                <div className="flex gap-2">
-                  {form.metricType !== "duration" && (
-                    <Input
-                      placeholder={form.metricType === "currency" ? "Moneda (ISO, ej. USD)" : "Unidad (ej. vasos, páginas)"}
-                      className="flex-1"
-                      maxLength={form.metricType === "currency" ? 3 : undefined}
-                      value={form.metricUnit}
-                      onChange={(e) =>
-                        set("metricUnit", form.metricType === "currency" ? e.target.value.toUpperCase() : e.target.value)
-                      }
-                    />
-                  )}
-                  <div className="flex flex-1 flex-col gap-1">
-                    <Label className="text-xs font-normal text-muted-foreground">
-                      {METRIC_TYPE_INFO[form.metricType].targetLabel}
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      step={form.metricType === "currency" ? "0.01" : "1"}
-                      placeholder={METRIC_TYPE_INFO[form.metricType].targetPlaceholder}
-                      required
-                      value={form.metricGoal}
-                      onChange={(e) => set("metricGoal", Number(e.target.value))}
-                    />
+              <div className="flex flex-col gap-2">
+                {form.metrics.map((metric, idx) => (
+                  <div key={idx} className="flex flex-col gap-2 rounded-md border border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder="Nombre de la métrica (ej. Páginas leídas)"
+                        required
+                        className="flex-1"
+                        value={metric.name}
+                        onChange={(e) => updateMetricRow(idx, { name: e.target.value })}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Eliminar métrica"
+                        disabled={form.metrics.length <= 1}
+                        onClick={() => removeMetricRow(idx)}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                    <Select
+                      value={metric.metric_type}
+                      onValueChange={(v) => updateMetricRow(idx, { metric_type: v as NewMetricInput["metric_type"] })}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="count">Cantidad (conteo)</SelectItem>
+                        <SelectItem value="duration">Duración (minutos)</SelectItem>
+                        <SelectItem value="currency">Monto (dinero)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">{METRIC_TYPE_INFO[metric.metric_type].help}</p>
+                    <div className="flex gap-2">
+                      {metric.metric_type !== "duration" && (
+                        <Input
+                          placeholder={
+                            metric.metric_type === "currency" ? "Moneda (ISO, ej. USD)" : "Unidad (ej. vasos, páginas)"
+                          }
+                          className="flex-1"
+                          maxLength={metric.metric_type === "currency" ? 3 : undefined}
+                          value={metric.unit}
+                          onChange={(e) =>
+                            updateMetricRow(idx, {
+                              unit: metric.metric_type === "currency" ? e.target.value.toUpperCase() : e.target.value,
+                            })
+                          }
+                        />
+                      )}
+                      <div className="flex flex-1 flex-col gap-1">
+                        <Label className="text-xs font-normal text-muted-foreground">
+                          {METRIC_TYPE_INFO[metric.metric_type].targetLabel}
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={metric.metric_type === "currency" ? "0.01" : "1"}
+                          placeholder={METRIC_TYPE_INFO[metric.metric_type].targetPlaceholder}
+                          required
+                          value={metric.goal}
+                          onChange={(e) => updateMetricRow(idx, { goal: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" className="self-start" onClick={addMetricRow}>
+                  <Plus className="size-4" />
+                  Agregar métrica
+                </Button>
               </div>
             )}
 
@@ -447,6 +559,43 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
                 />
               </div>
             )}
+
+            <div className="flex flex-col gap-2">
+              <Label>Vigencia</Label>
+              <div className="flex gap-1 rounded-lg border border-border bg-secondary p-1">
+                {(["indefinite", "end_date", "duration_days"] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={cn(
+                      "flex-1 rounded-md px-3 py-2 text-sm font-semibold",
+                      form.durationType === d ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+                    )}
+                    onClick={() => set("durationType", d)}
+                  >
+                    {d === "indefinite" ? "Indefinido" : d === "end_date" ? "Fecha de fin" : "Duración (días)"}
+                  </button>
+                ))}
+              </div>
+              {form.durationType === "end_date" && (
+                <Input
+                  type="date"
+                  value={form.durationEndDate}
+                  onChange={(e) => set("durationEndDate", e.target.value)}
+                />
+              )}
+              {form.durationType === "duration_days" && (
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.durationDays}
+                  onChange={(e) => set("durationDays", Number(e.target.value))}
+                />
+              )}
+              {editing?.effective_end_date && (
+                <p className="text-xs text-muted-foreground">Vence el {editing.effective_end_date}</p>
+              )}
+            </div>
 
             <div className="flex items-center justify-between">
               <Label className="mb-0">Recordatorio</Label>

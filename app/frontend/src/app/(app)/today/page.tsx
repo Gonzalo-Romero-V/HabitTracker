@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listHabits, type Habit } from "@/hooks/useHabits";
 import { listHabitLogs, type HabitLogEntry } from "@/hooks/useHabitLogs";
+import { listReminders } from "@/hooks/useReminders";
 import { useCategories } from "@/hooks/useCategories";
 import { getTodayStat, type TodayStat } from "@/hooks/useStats";
 import { useHabitForm } from "@/components/custom/HabitFormProvider";
@@ -14,6 +15,10 @@ type TodayEntry = {
   habit: Habit;
   log: HabitLogEntry | null;
   weekCompletedCount: number;
+  /** Hora del recordatorio más temprano del hábito ("HH:MM[:SS]"), o
+   * `null` si no tiene ninguno — usado para ordenar la agenda de "Hoy"
+   * cronológicamente (ver domain/reminder.md). */
+  earliestReminderTime: string | null;
 };
 
 /** Fecha local del navegador — mismo criterio que el resto de la app (ver
@@ -62,7 +67,10 @@ export default function TodayPage() {
       .then(async ([habits, todayStat]) => {
         setStat(todayStat);
 
-        const logsByHabit = await Promise.all(habits.map((h) => listHabitLogs(h.id)));
+        const [logsByHabit, remindersByHabit] = await Promise.all([
+          Promise.all(habits.map((h) => listHabitLogs(h.id))),
+          Promise.all(habits.map((h) => listReminders(h.id))),
+        ]);
         const today = todayLocalDateString();
         const weekStart = formatLocalDate(startOfWeekMonday(new Date()));
         const weekEnd = formatLocalDate(addDays(startOfWeekMonday(new Date()), 6));
@@ -74,16 +82,28 @@ export default function TodayPage() {
           const weekCompletedCount = logs.filter(
             (l) => l.status === "completed" && l.occurrence_date >= weekStart && l.occurrence_date <= weekEnd,
           ).length;
+          const reminders = remindersByHabit[i];
+          const earliestReminderTime =
+            reminders.length > 0
+              ? reminders.reduce((earliest, r) => (r.time_of_day < earliest ? r.time_of_day : earliest), reminders[0].time_of_day)
+              : null;
 
           // Los hábitos "fixed" solo están "debidos" hoy si el backend ya
           // pre-materializó un log para la fecha (ver domain/habit.md); los
           // "quota" no tienen calendario fijo así que siempre se muestran.
           if (habit.recurrence_type === "quota" || todayLog) {
-            due.push({ habit, log: todayLog, weekCompletedCount });
+            due.push({ habit, log: todayLog, weekCompletedCount, earliestReminderTime });
           }
         });
 
-        setEntries(due);
+        // Agenda cronológica: primero los sin recordatorio (orden original
+        // preservado entre ellos), después el resto ascendente por hora.
+        const withoutReminder = due.filter((e) => e.earliestReminderTime === null);
+        const withReminder = due
+          .filter((e) => e.earliestReminderTime !== null)
+          .sort((a, b) => (a.earliestReminderTime as string).localeCompare(b.earliestReminderTime as string));
+
+        setEntries([...withoutReminder, ...withReminder]);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudieron cargar los hábitos de hoy."))
       .finally(() => setIsLoading(false));
@@ -173,6 +193,7 @@ export default function TodayPage() {
                   categoryName={category?.name ?? null}
                   categoryColor={category?.color ?? null}
                   weekCompletedCount={entry.weekCompletedCount}
+                  reminderTime={entry.earliestReminderTime}
                   today={todayLocalDateString()}
                   onChanged={reload}
                   onOpenEdit={openEdit}

@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { toStoredTargetValue, fromStoredTargetValue } from "@/lib/habit-form-utils";
 
 type Props = {
   habit: Habit;
@@ -15,6 +16,9 @@ type Props = {
   categoryName: string | null;
   categoryColor: string | null;
   weekCompletedCount: number;
+  /** Hora del recordatorio más temprano del hábito ("HH:MM[:SS]"), o
+   * `null` si no tiene ninguno. */
+  reminderTime: string | null;
   today: string;
   onChanged: () => void;
   onOpenEdit: (habit: Habit) => void;
@@ -27,6 +31,7 @@ export function HabitTodayCard({
   categoryName,
   categoryColor,
   weekCompletedCount,
+  reminderTime,
   today,
   onChanged,
   onOpenEdit,
@@ -59,13 +64,16 @@ export function HabitTodayCard({
   async function submitMetrics(overrides: Record<number, number>) {
     setIsSaving(true);
     try {
-      const metrics = habit.metrics.map((m) => ({
-        habit_metric_id: m.id,
-        value:
-          overrides[m.id] ??
-          metricValues[m.id] ??
-          Number(log?.metrics.find((lm) => lm.habit_metric_id === m.id)?.value ?? 0),
-      }));
+      // `metricValues`/`overrides` ya están en unidad NATURAL (igual que el
+      // formulario de creación) — se convierte a unidad cruda (segundos/
+      // centavos) recién acá, al armar el payload para el backend.
+      const metrics = habit.metrics.map((m) => {
+        const naturalValue = overrides[m.id] ?? metricValues[m.id] ?? currentValue(m);
+        return {
+          habit_metric_id: m.id,
+          value: toStoredTargetValue(m.metric_type, naturalValue),
+        };
+      });
 
       if (log) {
         await updateHabitLog(habit.id, log.id, metrics);
@@ -80,11 +88,13 @@ export function HabitTodayCard({
     }
   }
 
+  /** Siempre en unidad NATURAL (minutos, cantidad, monto) — `metricValues`
+   * ya viene así (es lo que el usuario tipea); si no hay valor local
+   * todavía, se convierte desde el valor crudo del log (segundos/centavos). */
   function currentValue(metric: HabitMetric): number {
-    return (
-      metricValues[metric.id] ??
-      Number(log?.metrics.find((lm) => lm.habit_metric_id === metric.id)?.value ?? 0)
-    );
+    if (metricValues[metric.id] !== undefined) return metricValues[metric.id];
+    const rawFromLog = Number(log?.metrics.find((lm) => lm.habit_metric_id === metric.id)?.value ?? 0);
+    return fromStoredTargetValue(metric.metric_type, rawFromLog);
   }
 
   function handleStep(metric: HabitMetric, delta: number, e: React.MouseEvent) {
@@ -129,7 +139,14 @@ export function HabitTodayCard({
           style={{ backgroundColor: categoryColor ?? "var(--muted-foreground)" }}
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{habit.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-semibold">{habit.name}</p>
+            {reminderTime && (
+              <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                {reminderTime.slice(0, 5)}
+              </span>
+            )}
+          </div>
           {meta && <p className="truncate text-xs text-muted-foreground">{meta}</p>}
         </div>
 
@@ -161,9 +178,11 @@ export function HabitTodayCard({
       {habit.tracking_type === "quantifiable" &&
         habit.metrics.map((metric) => {
           const value = currentValue(metric);
-          const target = Number(metric.target_value ?? 0);
+          const target = fromStoredTargetValue(metric.metric_type, Number(metric.target_value ?? 0));
           const percentage = target > 0 ? Math.min(100, (value / target) * 100) : 0;
-          const step = metric.metric_type === "currency" ? 10 : 1;
+          const step = 1;
+          const unitSuffix =
+            metric.metric_type === "duration" ? "min" : metric.metric_type === "currency" ? metric.currency_code : metric.unit;
 
           return (
             <div key={metric.id} className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
@@ -202,7 +221,7 @@ export function HabitTodayCard({
                 </Button>
                 <span className="flex-1 truncate text-right text-xs text-muted-foreground">
                   Meta: {target}
-                  {metric.unit ? ` ${metric.unit}` : ""}
+                  {unitSuffix ? ` ${unitSuffix}` : ""}
                 </span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
