@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -16,9 +17,19 @@ class Habit extends Model
         'status',
         'recurrence_type',
         'recurrence_rule',
+        'duration_type',
+        'duration_end_date',
+        'duration_days',
         'current_streak',
         'best_streak',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'duration_end_date' => 'date',
+        ];
+    }
 
     /**
      * Defaults a nivel Eloquent, no solo de columna — Postgres no repuebla
@@ -28,6 +39,7 @@ class Habit extends Model
      */
     protected $attributes = [
         'status' => 'active',
+        'duration_type' => 'indefinite',
         'current_streak' => 0,
         'best_streak' => 0,
     ];
@@ -82,5 +94,35 @@ class Habit extends Model
             ->whereDate('effective_from', '<=', $date)
             ->orderByDesc('effective_from')
             ->first();
+    }
+
+    /**
+     * Fecha (inclusive, string Y-m-d) en que este hábito deja de estar
+     * vigente — null si `indefinite` (nunca vence). Para `duration_days`,
+     * se cuenta en días de calendario desde la fecha de creación del
+     * hábito **en el timezone de su usuario dueño**, nunca UTC (mismo
+     * principio que el resto del modelo, ver domain/habit.md). Se opera
+     * siempre sobre `->toDateString()` (nunca sobre el objeto Carbon con
+     * instante) para evitar el gotcha documentado en decisions/
+     * architecture.md — `CarbonImmutable::parse($valor, $tz)` ignora $tz
+     * cuando $valor ya es un Carbon con timezone propio. Usada por
+     * HabitOccurrenceMaterializer (no generar ocurrencias más allá de esta
+     * fecha) y por el job de cierres (auto-archivar al vencer).
+     */
+    public function effectiveEndDate(): ?string
+    {
+        if ($this->duration_type === 'end_date') {
+            return $this->duration_end_date?->toDateString();
+        }
+
+        if ($this->duration_type === 'duration_days' && $this->duration_days) {
+            $createdDateInUserTz = CarbonImmutable::parse($this->created_at)
+                ->setTimezone($this->user->timezone)
+                ->toDateString();
+
+            return CarbonImmutable::parse($createdDateInUserTz)->addDays($this->duration_days)->toDateString();
+        }
+
+        return null;
     }
 }

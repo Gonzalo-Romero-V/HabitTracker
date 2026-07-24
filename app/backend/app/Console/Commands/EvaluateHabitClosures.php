@@ -21,6 +21,12 @@ use Illuminate\Console\Command;
  *      encuentra semanas nuevas que cerrar.
  *   3. Consolida user_daily_stats de "ayer" (en timezone de cada
  *      usuario) — ver domain/user-daily-stat.md. Idempotente (upsert).
+ *   4. Auto-archiva hábitos cuya vigencia (duration_type end_date/
+ *      duration_days) ya venció — reusa el estado `archived` existente
+ *      (mismo efecto que archivar a mano: deja de generar ocurrencias,
+ *      deja de disparar recordatorios, sale de "Hoy") en vez de introducir
+ *      un estado nuevo. Idempotente: un hábito ya archivado no vuelve a
+ *      procesarse (el query solo trae `active`).
  */
 class EvaluateHabitClosures extends Command
 {
@@ -74,7 +80,24 @@ class EvaluateHabitClosures extends Command
             }
         });
 
-        $this->info("Ocurrencias marcadas missed: {$missedCount}. Hábitos quota re-evaluados: {$quotaHabitsCount}. Usuarios con stats diarios consolidados: {$usersProcessed}.");
+        $expiredCount = 0;
+        Habit::query()
+            ->where('status', 'active')
+            ->where('duration_type', '!=', 'indefinite')
+            ->with('user')
+            ->chunkById(200, function ($habits) use (&$expiredCount) {
+                foreach ($habits as $habit) {
+                    $effectiveEndDate = $habit->effectiveEndDate();
+                    $todayInTz = CarbonImmutable::now($habit->user->timezone)->toDateString();
+
+                    if ($effectiveEndDate !== null && $effectiveEndDate < $todayInTz) {
+                        $habit->update(['status' => 'archived']);
+                        $expiredCount++;
+                    }
+                }
+            });
+
+        $this->info("Ocurrencias marcadas missed: {$missedCount}. Hábitos quota re-evaluados: {$quotaHabitsCount}. Usuarios con stats diarios consolidados: {$usersProcessed}. Hábitos auto-archivados por vigencia vencida: {$expiredCount}.");
 
         return self::SUCCESS;
     }

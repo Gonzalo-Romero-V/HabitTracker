@@ -29,6 +29,7 @@ class StatsController extends Controller
                 'date' => $today,
                 'due_count' => $counts['due_count'],
                 'completed_count' => $counts['completed_count'],
+                'weighted_completed_count' => $counts['weighted_completed_count'],
             ],
         ]);
     }

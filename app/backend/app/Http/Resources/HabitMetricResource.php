@@ -20,6 +20,15 @@ class HabitMetricResource extends JsonResource
             'unit' => $this->unit,
             'currency_code' => $this->currency_code,
             'target_value' => $this->currentTargetVersion()?->target_value,
+            // Historial completo de versiones — necesario para dibujar la
+            // meta como función escalonada a través del tiempo (ver
+            // domain/habit-metric.md → versionado; nunca una línea
+            // horizontal fija con el valor vigente actual). Volumen bajo
+            // por diseño (una fila por cambio de meta, no por día).
+            'target_versions' => $this->targetVersions->sortBy('effective_from')->values()->map(fn ($v) => [
+                'target_value' => $v->target_value,
+                'effective_from' => $v->effective_from->toDateString(),
+            ]),
             'created_at' => $this->created_at,
         ];
     }

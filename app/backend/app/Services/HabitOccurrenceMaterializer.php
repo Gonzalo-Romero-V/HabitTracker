@@ -19,6 +19,20 @@ class HabitOccurrenceMaterializer
 
     public function materializeRange(Habit $habit, CarbonImmutable $start, CarbonImmutable $end): int
     {
+        // Nunca generar ocurrencias pending más allá de la vigencia del
+        // hábito (ver Habit::effectiveEndDate() — null si `indefinite`).
+        // Si la vigencia ya venció antes del inicio del rango pedido, no
+        // hay nada que materializar acá — el job de cierres se encarga de
+        // archivar el hábito por separado, esto solo evita crear "deuda"
+        // de ocurrencias que nunca deberían haber existido.
+        $effectiveEndDate = $habit->effectiveEndDate();
+        if ($effectiveEndDate !== null) {
+            $end = CarbonImmutable::parse(min($end->toDateString(), $effectiveEndDate));
+            if ($end->toDateString() < $start->toDateString()) {
+                return 0;
+            }
+        }
+
         $occurrences = $this->expansion->occurrencesBetween($habit, $start, $end);
         $created = 0;
 

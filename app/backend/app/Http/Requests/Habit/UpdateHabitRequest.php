@@ -38,6 +38,23 @@ class UpdateHabitRequest extends FormRequest
             // se exigen juntos para no dejar una versión a medias.
             'quota_target' => ['sometimes', 'required_with:quota_period', 'integer', 'min:1'],
             'quota_period' => ['sometimes', 'required_with:quota_target', Rule::in(['week'])],
+
+            // Vigencia — editable en cualquier momento (a diferencia de
+            // tracking_type/recurrence_type): no versiona, el cambio aplica
+            // desde ahora (mismo criterio que recurrence_rule).
+            'duration_type' => ['sometimes', Rule::in(['indefinite', 'end_date', 'duration_days'])],
+            'duration_end_date' => [
+                'required_if:duration_type,end_date',
+                'prohibited_unless:duration_type,end_date',
+                'date',
+                'after:today',
+            ],
+            'duration_days' => [
+                'required_if:duration_type,duration_days',
+                'prohibited_unless:duration_type,duration_days',
+                'integer',
+                'min:1',
+            ],
         ];
     }
 

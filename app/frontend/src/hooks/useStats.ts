@@ -6,12 +6,20 @@ export type TodayStat = {
   date: string;
   due_count: number;
   completed_count: number;
+  weighted_completed_count: number;
 };
 
 export type DailyStat = {
   date: string;
   due_count: number;
   completed_count: number;
+  /** Índice fraccionario [0, due_count] — a diferencia de completed_count
+   * (todo-o-nada), un hábito cuantificable a medio camino de su meta cuenta
+   * parcialmente (ej. 8 de 10 vasos de agua = 0.8). Es lo que alimenta el
+   * score del heatmap (Calendario/Memento Mori) — ver lib/heatmap.ts. Nunca
+   * usar completed_count para colorear el heatmap, esto es lo que refleja
+   * con precisión "qué tan bien se cumplieron los objetivos" del día. */
+  weighted_completed_count: number;
 };
 
 export type MonthlyTrendPoint = {

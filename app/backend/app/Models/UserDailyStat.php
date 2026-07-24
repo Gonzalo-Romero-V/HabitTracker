@@ -12,12 +12,14 @@ class UserDailyStat extends Model
         'date',
         'due_count',
         'completed_count',
+        'weighted_completed_count',
     ];
 
     protected function casts(): array
     {
         return [
             'date' => 'date',
+            'weighted_completed_count' => 'decimal:4',
         ];
     }
 

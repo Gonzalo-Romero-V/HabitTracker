@@ -49,6 +49,21 @@ class StoreHabitRequest extends FormRequest
                 Rule::in(['week']),
             ],
 
+            // Vigencia — opcional, default `indefinite` si se omite.
+            'duration_type' => ['sometimes', Rule::in(['indefinite', 'end_date', 'duration_days'])],
+            'duration_end_date' => [
+                'required_if:duration_type,end_date',
+                'prohibited_unless:duration_type,end_date',
+                'date',
+                'after:today',
+            ],
+            'duration_days' => [
+                'required_if:duration_type,duration_days',
+                'prohibited_unless:duration_type,duration_days',
+                'integer',
+                'min:1',
+            ],
+
             // Solo aplica si tracking_type = quantifiable — al menos una métrica.
             'metrics' => [
                 'required_if:tracking_type,quantifiable',

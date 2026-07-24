@@ -2,6 +2,11 @@
 
 import { apiFetch } from "@/lib/api";
 
+export type HabitMetricTargetVersion = {
+  target_value: string;
+  effective_from: string;
+};
+
 export type HabitMetric = {
   id: number;
   habit_id: number;
@@ -10,8 +15,16 @@ export type HabitMetric = {
   unit: string | null;
   currency_code: string | null;
   target_value: string | null;
+  /** Historial completo, ordenado ascendente por effective_from — para
+   * dibujar la meta como función escalonada a través del tiempo (ver
+   * domain/habit-metric.md). Nunca usar solo target_value para una serie
+   * histórica: el valor vigente no es necesariamente el que regía en cada
+   * fecha pasada. */
+  target_versions: HabitMetricTargetVersion[];
   created_at: string;
 };
+
+export type DurationType = "indefinite" | "end_date" | "duration_days";
 
 export type Habit = {
   id: number;
@@ -23,6 +36,14 @@ export type Habit = {
   recurrence_rule: string | null;
   quota_target: number | null;
   quota_period: "week" | null;
+  duration_type: DurationType;
+  duration_end_date: string | null;
+  duration_days: number | null;
+  /** Calculado por el backend (Habit::effectiveEndDate()) — fecha Y-m-d en
+   * que el hábito deja de estar vigente, o null si `indefinite`. Nunca
+   * recalcular esto en el frontend a partir de duration_days: el backend
+   * ya lo resuelve en el timezone del usuario dueño. */
+  effective_end_date: string | null;
   current_streak: number;
   best_streak: number;
   metrics: HabitMetric[];
@@ -52,6 +73,10 @@ export type NewHabitInput = {
   recurrence_rule?: string;
   quota_target?: number;
   quota_period?: "week";
+  /** Default backend: "indefinite" si se omite. */
+  duration_type?: DurationType;
+  duration_end_date?: string;
+  duration_days?: number;
   metrics?: NewMetricInput[];
 };
 
@@ -78,6 +103,9 @@ export type UpdateHabitInput = {
   recurrence_rule?: string;
   quota_target?: number;
   quota_period?: "week";
+  duration_type?: DurationType;
+  duration_end_date?: string;
+  duration_days?: number;
 };
 
 export function updateHabit(id: number, input: UpdateHabitInput) {
@@ -113,6 +141,13 @@ export function listHabitMonthlyStats(habitId: number) {
   return apiFetch<HabitMonthlyStatEntry[]>(`/habits/${habitId}/stats/monthly`, { method: "GET" });
 }
 
+export function createHabitMetric(habitId: number, input: NewMetricInput) {
+  return apiFetch<HabitMetric>(`/habits/${habitId}/metrics`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function updateHabitMetric(
   habitId: number,
   metricId: number,
@@ -122,6 +157,10 @@ export function updateHabitMetric(
     method: "PATCH",
     body: JSON.stringify(input),
   });
+}
+
+export function deleteHabitMetric(habitId: number, metricId: number) {
+  return apiFetch<null>(`/habits/${habitId}/metrics/${metricId}`, { method: "DELETE" });
 }
 
 export type { PaginatedMeta };
