@@ -5,11 +5,12 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getTodayStat, getDailyStats, type TodayStat, type DailyStat } from "@/hooks/useStats";
 import { listHabits, type Habit } from "@/hooks/useHabits";
 import { listHabitLogs, type HabitLogEntry } from "@/hooks/useHabitLogs";
-import { statToScore, HEATMAP_LEGEND } from "@/lib/heatmap";
+import { statToScore } from "@/lib/heatmap";
 import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { HeatmapLegend } from "@/components/custom/HeatmapLegend";
 import { DayCell } from "./DayCell";
 
 const WEEKDAY_LABELS = ["D", "L", "M", "M", "J", "V", "S"];
@@ -137,10 +138,10 @@ export default function CalendarPage() {
 
   function scoreForDate(iso: string): number | null {
     if (iso === todayISO) {
-      return todayStat ? statToScore(todayStat.due_count, todayStat.completed_count) : null;
+      return todayStat ? statToScore(todayStat.due_count, todayStat.weighted_completed_count) : null;
     }
     const row = dailyStats[iso];
-    return row ? statToScore(row.due_count, row.completed_count) : null;
+    return row ? statToScore(row.due_count, row.weighted_completed_count) : null;
   }
 
   const selectedIsFuture = selectedDate > todayISO;
@@ -205,22 +206,7 @@ export default function CalendarPage() {
 
           <Separator />
 
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {HEATMAP_LEGEND.map((step) => (
-              <div key={step.label} className="flex items-center gap-1.5">
-                <span className="size-3 rounded-full" style={{ backgroundColor: step.token }} />
-                <span className="text-xs text-muted-foreground">{step.label}</span>
-              </div>
-            ))}
-            <div className="flex items-center gap-1.5">
-              <span className="size-3 rounded-full" style={{ backgroundColor: "var(--track)" }} />
-              <span className="text-xs text-muted-foreground">Sin datos</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="size-3 rounded-full border border-dashed border-border" />
-              <span className="text-xs text-muted-foreground">Futuro</span>
-            </div>
-          </div>
+          <HeatmapLegend showFuture className="flex flex-wrap gap-x-4 gap-y-2" />
         </CardContent>
       </Card>
 
@@ -237,7 +223,7 @@ export default function CalendarPage() {
             <p className="text-sm text-muted-foreground">
               {selectedStat.completed_count} de {selectedStat.due_count} hábitos completados
               {(() => {
-                const score = statToScore(selectedStat.due_count, selectedStat.completed_count);
+                const score = statToScore(selectedStat.due_count, selectedStat.weighted_completed_count);
                 return score !== null ? ` (${score}%)` : "";
               })()}
             </p>

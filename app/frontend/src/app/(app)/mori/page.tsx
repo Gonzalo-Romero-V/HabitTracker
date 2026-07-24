@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { getDailyStats, getFirstLogDate, type DailyStat } from "@/hooks/useStats";
-import { HEATMAP_LEGEND, scoreToColor, statToScore } from "@/lib/heatmap";
+import { statToScore } from "@/lib/heatmap";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { HeatmapLegend } from "@/components/custom/HeatmapLegend";
 import { Cell } from "./Cell";
 import { addDays, formatDateOnly, getISOWeek, parseDateOnly, todayDateOnly } from "./iso-week";
 
@@ -31,7 +32,8 @@ function buildWeekMap(stats: DailyStat[]): Map<string, { due: number; completed:
     const key = `${isoYear}-${isoWeek}`;
     const entry = map.get(key) ?? { due: 0, completed: 0 };
     entry.due += row.due_count;
-    entry.completed += row.completed_count;
+    // Índice fraccionario, no el conteo todo-o-nada — ver lib/heatmap.ts.
+    entry.completed += row.weighted_completed_count;
     map.set(key, entry);
   }
   return map;
@@ -129,7 +131,7 @@ export default function MoriPage() {
     for (let d = jan1; d.getTime() <= today.getTime(); d = addDays(d, 1)) {
       const dateStr = formatDateOnly(d);
       const row = byDate.get(dateStr);
-      cells.push({ date: dateStr, score: row ? statToScore(row.due_count, row.completed_count) : null });
+      cells.push({ date: dateStr, score: row ? statToScore(row.due_count, row.weighted_completed_count) : null });
     }
     return cells;
   }, [view, stats]);
@@ -142,7 +144,7 @@ export default function MoriPage() {
   }, [weekMap]);
 
   const yearStat = useMemo(() => {
-    const scores = stats.map((row) => statToScore(row.due_count, row.completed_count));
+    const scores = stats.map((row) => statToScore(row.due_count, row.weighted_completed_count));
     const withData = scores.filter((s): s is number => s !== null);
     const avg = withData.length ? Math.round(withData.reduce((a, b) => a + b, 0) / withData.length) : null;
     return { count: stats.length, avg };
@@ -203,18 +205,29 @@ export default function MoriPage() {
                 )}
               </p>
 
-              <div className="overflow-x-auto rounded-3xl border border-border bg-card p-4">
-                <div className="flex min-w-max flex-col gap-1.5">
+              {/* Grid fluido (columnas 1fr, nunca px fijo) — cada celda ocupa
+                  exactamente el ancho disponible del contenedor, así que
+                  53 semanas × ~90 años entran siempre sin scroll horizontal,
+                  en mobile o PC, sin importar el viewport. `max-w` evita que
+                  las celdas se vuelvan bloques enormes en pantallas anchas. */}
+              <div className="rounded-3xl border border-border bg-card p-3">
+                <div className="mx-auto flex max-w-[420px] flex-col gap-[1.5px]">
                   {weekRows.map((row) => (
-                    <div key={row.year} className="flex items-center gap-2">
-                      <span className="w-10 shrink-0 text-xs text-muted-foreground">{row.year}</span>
-                      <div className="flex gap-[3px]">
+                    <div key={row.year} className="flex items-center gap-1">
+                      <span className="w-5 shrink-0 text-right text-[9px] leading-none text-muted-foreground">
+                        {String(row.year).slice(2)}
+                      </span>
+                      <div
+                        className="grid flex-1 gap-[1px]"
+                        style={{ gridTemplateColumns: `repeat(${WEEKS_PER_ROW}, minmax(0, 1fr))` }}
+                      >
                         {row.weeks.map((cell, i) => (
                           <Cell
                             key={i}
                             score={cell.score}
                             isFuture={cell.isFuture}
                             title={`${row.year} · semana ${i + 1}`}
+                            className="aspect-square rounded-[1px]"
                           />
                         ))}
                       </div>
@@ -250,24 +263,7 @@ export default function MoriPage() {
         </>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3">
-        {HEATMAP_LEGEND.map((step) => (
-          <div key={step.label} className="flex items-center gap-1.5">
-            <span className="size-2.5 rounded-[2px]" style={{ backgroundColor: step.token }} />
-            <span className="text-xs text-muted-foreground">{step.label}</span>
-          </div>
-        ))}
-        <div className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-[2px]" style={{ backgroundColor: scoreToColor(null) }} />
-          <span className="text-xs text-muted-foreground">Sin registro</span>
-        </div>
-        {view === "global" && (
-          <div className="flex items-center gap-1.5">
-            <span className="size-2.5 rounded-[2px] border border-dashed border-border" />
-            <span className="text-xs text-muted-foreground">Futuro</span>
-          </div>
-        )}
-      </div>
+      <HeatmapLegend showFuture={view === "global"} />
     </div>
   );
 }
