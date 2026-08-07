@@ -81,6 +81,15 @@ code_path: ""
   job mensual, ver [[habit-log]] → Notas de implementación). `DELETE`
   existe (deshacer un check-off). Ambos `POST`/`PATCH` aceptan
   `metrics: [{ habit_metric_id, value }]` para hábitos `quantifiable`.
+  `GET` acepta `from`/`to` (`YYYY-MM-DD`, filtran `occurrence_date` en
+  rango cerrado) y `per_page` (clamp 1-100). **Resuelto (2026-08-06)**:
+  antes de `from`/`to`, un hábito con historial + materialización futura
+  (ver [[habit]]) que superaba los 15 registros por página escondía "hoy"
+  en páginas siguientes que ningún consumidor pedía — la pantalla "Hoy"
+  mostraba "no tienes hábitos programados" con hábitos y logs reales.
+  Todo consumidor de este endpoint debe pasar el rango que necesita
+  (nunca confiar en el orden descendente default para encontrar una
+  fecha específica).
 - `/api/v1/categories` — CRUD de [[category]].
 - `/api/v1/device-tokens` — registrar/eliminar [[device-token]] del
   dispositivo actual (usado por el scheduler de [[reminder]] para push).

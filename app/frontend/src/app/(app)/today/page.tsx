@@ -63,17 +63,23 @@ export default function TodayPage() {
     setIsLoading(true);
     setError(null);
 
+    const today = todayLocalDateString();
+    const weekStart = formatLocalDate(startOfWeekMonday(new Date()));
+    const weekEnd = formatLocalDate(addDays(startOfWeekMonday(new Date()), 6));
+
     Promise.all([listHabits("active"), getTodayStat()])
       .then(async ([habits, todayStat]) => {
         setStat(todayStat);
 
+        // Rango de la semana ISO actual — incluye "hoy" (para el check-off
+        // del día) y toda la semana (para weekCompletedCount). Sin esto el
+        // backend devuelve por defecto los logs más recientes por fecha
+        // descendente, que con materialización a futuro puede no incluir
+        // "hoy" en absoluto (ver domain/habit.md).
         const [logsByHabit, remindersByHabit] = await Promise.all([
-          Promise.all(habits.map((h) => listHabitLogs(h.id))),
+          Promise.all(habits.map((h) => listHabitLogs(h.id, { from: weekStart, to: weekEnd }))),
           Promise.all(habits.map((h) => listReminders(h.id))),
         ]);
-        const today = todayLocalDateString();
-        const weekStart = formatLocalDate(startOfWeekMonday(new Date()));
-        const weekEnd = formatLocalDate(addDays(startOfWeekMonday(new Date()), 6));
 
         const due: TodayEntry[] = [];
         habits.forEach((habit, i) => {
@@ -112,6 +118,26 @@ export default function TodayPage() {
   useEffect(() => {
     reload();
   }, [reload, version]);
+
+  /** Aplica el resultado de un check-off/step sin recargar la lista
+   * entera — antes cada +1 disparaba `reload()` completo (todos los
+   * hábitos + sus logs + recordatorios) y de paso mostraba el spinner de
+   * pantalla completa, cortando cualquier click seguido. El anillo de
+   * progreso sí se refresca, pero en segundo plano y sin bloquear. */
+  const handleEntryChanged = useCallback((habitId: number, newLog: HabitLogEntry | null) => {
+    setEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.habit.id !== habitId) return entry;
+        const wasCompleted = entry.log?.status === "completed";
+        const isNowCompleted = newLog?.status === "completed";
+        const delta = isNowCompleted && !wasCompleted ? 1 : !isNowCompleted && wasCompleted ? -1 : 0;
+        return { ...entry, log: newLog, weekCompletedCount: entry.weekCompletedCount + delta };
+      }),
+    );
+    getTodayStat()
+      .then(setStat)
+      .catch(() => {});
+  }, []);
 
   const categoryMap = useMemo(() => {
     const map = new Map<number, { name: string; color: string | null }>();
@@ -195,7 +221,7 @@ export default function TodayPage() {
                   weekCompletedCount={entry.weekCompletedCount}
                   reminderTime={entry.earliestReminderTime}
                   today={todayLocalDateString()}
-                  onChanged={reload}
+                  onChanged={(log) => handleEntryChanged(entry.habit.id, log)}
                   onOpenEdit={openEdit}
                   onError={setError}
                 />

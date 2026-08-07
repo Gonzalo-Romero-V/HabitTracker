@@ -27,6 +27,13 @@ function todayLocalDateString(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function daysAgoLocalDateString(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 const STATUS_LABEL: Record<HabitLogEntry["status"], string> = {
   completed: "Completado",
   missed: "Fallado",
@@ -53,7 +60,13 @@ export function HabitDetailClient() {
 
   function reload() {
     setIsLoading(true);
-    Promise.all([getHabit(habitId), listHabitLogs(habitId)])
+    // Rango acotado a "hoy" hacia atrás: incluye el log de hoy (para el
+    // check-off) y el historial reciente pasado — sin `to`, el backend
+    // devuelve por defecto lo más reciente por fecha descendente, que con
+    // materialización a futuro queda dominado por fechas que todavía no
+    // ocurrieron (ver domain/habit.md).
+    const today = todayLocalDateString();
+    Promise.all([getHabit(habitId), listHabitLogs(habitId, { from: daysAgoLocalDateString(30), to: today })])
       .then(([h, l]) => {
         setHabit(h);
         setLogs(l);
@@ -67,16 +80,30 @@ export function HabitDetailClient() {
   const today = todayLocalDateString();
   const todayLog = logs.find((l) => l.occurrence_date === today) ?? null;
 
+  /** Aplica el log de hoy sin recargar hábito+historial completos — antes
+   * cada check-off/step disparaba `reload()`, que ponía `isLoading` y
+   * reemplazaba toda la pantalla por "Cargando...", cortando cualquier
+   * click seguido. El hábito sí se refresca (el streak puede cambiar),
+   * pero en segundo plano y sin el spinner de pantalla completa. */
+  function applyLogChange(newLog: HabitLogEntry | null) {
+    setLogs((prev) => {
+      const withoutToday = prev.filter((l) => l.occurrence_date !== today);
+      return newLog ? [newLog, ...withoutToday] : withoutToday;
+    });
+    getHabit(habitId)
+      .then(setHabit)
+      .catch(() => {});
+  }
+
   async function handleBinaryCheckOff() {
     setError(null);
     setIsSaving(true);
     try {
       if (todayLog) {
-        await updateHabitLog(habitId, todayLog.id);
+        applyLogChange(await updateHabitLog(habitId, todayLog.id));
       } else {
-        await createHabitLog(habitId, { occurrence_date: today });
+        applyLogChange(await createHabitLog(habitId, { occurrence_date: today }));
       }
-      reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo registrar.");
     } finally {
@@ -90,7 +117,7 @@ export function HabitDetailClient() {
     setIsSaving(true);
     try {
       await deleteHabitLog(habitId, todayLog.id);
-      reload();
+      applyLogChange(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo deshacer.");
     } finally {
@@ -110,11 +137,10 @@ export function HabitDetailClient() {
     }));
     try {
       if (todayLog) {
-        await updateHabitLog(habitId, todayLog.id, metrics);
+        applyLogChange(await updateHabitLog(habitId, todayLog.id, metrics));
       } else {
-        await createHabitLog(habitId, { occurrence_date: today, metrics });
+        applyLogChange(await createHabitLog(habitId, { occurrence_date: today, metrics }));
       }
-      reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
     } finally {

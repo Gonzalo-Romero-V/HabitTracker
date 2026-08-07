@@ -99,28 +99,40 @@ export default function CalendarPage() {
       .finally(() => setIsLoadingMonth(false));
   }, [visibleMonth]);
 
-  // Hábitos activos + sus últimos logs, una sola vez — alimentan el detalle
-  // por hábito de cualquier día que se seleccione (listHabitLogs solo trae
-  // los últimos ~30 registros por hábito, que alcanza para el propio
-  // alcance del calendario).
+  // Hábitos activos, una sola vez — la lista en sí no depende del mes visible.
   useEffect(() => {
+    listHabits("active")
+      .then((habits) => setActiveHabits(habits))
+      .catch((err) => setHabitsError(err instanceof ApiError ? err.message : "No se pudo cargar el detalle por hábito."));
+  }, []);
+
+  // Logs por hábito, acotados al mes visible — se recarga al navegar de
+  // mes. Sin `from`/`to` el backend devuelve por defecto lo más reciente
+  // por fecha descendente, que con materialización a futuro puede no
+  // incluir el mes que se está mirando en absoluto (ver domain/habit.md).
+  useEffect(() => {
+    if (activeHabits.length === 0) {
+      setLogsByHabit({});
+      return;
+    }
+
     setIsLoadingHabits(true);
     setHabitsError(null);
 
-    listHabits("active")
-      .then((habits) => {
-        setActiveHabits(habits);
-        return Promise.all(habits.map((h) => listHabitLogs(h.id))).then((logsPerHabit) => {
-          const map: Record<number, HabitLogEntry[]> = {};
-          habits.forEach((h, i) => {
-            map[h.id] = logsPerHabit[i];
-          });
-          setLogsByHabit(map);
+    const from = toISODate(visibleMonth);
+    const to = toISODate(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), daysInMonth(visibleMonth)));
+
+    Promise.all(activeHabits.map((h) => listHabitLogs(h.id, { from, to })))
+      .then((logsPerHabit) => {
+        const map: Record<number, HabitLogEntry[]> = {};
+        activeHabits.forEach((h, i) => {
+          map[h.id] = logsPerHabit[i];
         });
+        setLogsByHabit(map);
       })
       .catch((err) => setHabitsError(err instanceof ApiError ? err.message : "No se pudo cargar el detalle por hábito."))
       .finally(() => setIsLoadingHabits(false));
-  }, []);
+  }, [activeHabits, visibleMonth]);
 
   function goToMonth(delta: number) {
     setVisibleMonth((prev) => addMonths(prev, delta));

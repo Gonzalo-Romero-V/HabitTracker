@@ -47,7 +47,15 @@ export default function AnalyticsPage() {
         const [daily, trend, logsList] = await Promise.all([
           getDailyStats(toDateStr(from), toDateStr(to)),
           getMonthlyTrend(6),
-          Promise.all(activeHabits.map((h) => listHabitLogs(h.id).catch(() => [] as HabitLogEntry[]))),
+          // Mismo rango de 30 días que getDailyStats — sin esto el backend
+          // devuelve por defecto lo más reciente por fecha descendente, que
+          // con materialización a futuro queda dominado por fechas que
+          // todavía no ocurrieron (ver domain/habit.md).
+          Promise.all(
+            activeHabits.map((h) =>
+              listHabitLogs(h.id, { from: toDateStr(from), to: toDateStr(to) }).catch(() => [] as HabitLogEntry[]),
+            ),
+          ),
         ]);
         if (cancelled) return;
 

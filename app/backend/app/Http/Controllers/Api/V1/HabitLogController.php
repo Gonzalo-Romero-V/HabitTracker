@@ -20,10 +20,20 @@ class HabitLogController extends Controller
     {
         $this->authorize('view', $habit);
 
+        // `from`/`to` filtran por `occurrence_date` (rango cerrado) — sin
+        // esto, un hábito con logs materializados hasta fin de mes (ver
+        // HabitOccurrenceMaterializer) satura la página 1 con fechas
+        // futuras y esconde el registro de "hoy" en páginas siguientes que
+        // el frontend nunca pide. `per_page` respeta lo pedido por el
+        // cliente (clamp 1-100) en vez del default fijo de Laravel.
+        $perPage = max(1, min((int) $request->query('per_page', 15), 100));
+
         $logs = $habit->logs()
             ->with('metricLogs')
+            ->when($request->query('from'), fn ($query, $from) => $query->where('occurrence_date', '>=', $from))
+            ->when($request->query('to'), fn ($query, $to) => $query->where('occurrence_date', '<=', $to))
             ->orderByDesc('occurrence_date')
-            ->paginate();
+            ->paginate($perPage);
 
         return response()->json([
             'data' => HabitLogResource::collection($logs->items()),

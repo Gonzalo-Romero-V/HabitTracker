@@ -20,7 +20,9 @@ type Props = {
    * `null` si no tiene ninguno. */
   reminderTime: string | null;
   today: string;
-  onChanged: () => void;
+  /** Log resultante tras crear/actualizar/borrar (`null` si se deshizo el
+   * check-off) — el padre lo aplica localmente en vez de recargar todo. */
+  onChanged: (log: HabitLogEntry | null) => void;
   onOpenEdit: (habit: Habit) => void;
   onError: (message: string) => void;
 };
@@ -48,12 +50,12 @@ export function HabitTodayCard({
     try {
       if (isCompleted && log) {
         await deleteHabitLog(habit.id, log.id);
+        onChanged(null);
       } else if (log) {
-        await updateHabitLog(habit.id, log.id);
+        onChanged(await updateHabitLog(habit.id, log.id));
       } else {
-        await createHabitLog(habit.id, { occurrence_date: today });
+        onChanged(await createHabitLog(habit.id, { occurrence_date: today }));
       }
-      onChanged();
     } catch (err) {
       onError(err instanceof ApiError ? err.message : "No se pudo registrar el hábito.");
     } finally {
@@ -76,11 +78,10 @@ export function HabitTodayCard({
       });
 
       if (log) {
-        await updateHabitLog(habit.id, log.id, metrics);
+        onChanged(await updateHabitLog(habit.id, log.id, metrics));
       } else {
-        await createHabitLog(habit.id, { occurrence_date: today, metrics });
+        onChanged(await createHabitLog(habit.id, { occurrence_date: today, metrics }));
       }
-      onChanged();
     } catch (err) {
       onError(err instanceof ApiError ? err.message : "No se pudo guardar el valor.");
     } finally {

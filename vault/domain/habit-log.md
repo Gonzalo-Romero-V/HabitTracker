@@ -91,6 +91,13 @@ recalculable desde el detalle. El streak sigue derivándose del historial
 completo de `HabitLog`, nunca de los agregados mensuales (ver invariante
 en [[vision]]).
 
+Como consecuencia de pre-generar el mes completo, el total de logs de un
+hábito crece rápido (historial pasado + resto del mes futuro). Cualquier
+consumidor de `GET /habits/{habit}/logs` que necesite una fecha puntual
+(ej. "hoy") **debe** pasar `from`/`to` — el default es paginado
+descendente por `occurrence_date`, así que sin rango explícito una fecha
+puede quedar fuera de la primera página (ver [[api-contracts]]).
+
 Un `HabitLog` admite borrado físico (deshacer un check-off), no solo
 `create`/`update`. Borrar un log libera la combinación única
 `habit_id`+`occurrence_date` (puede volver a registrarse) y obliga a
