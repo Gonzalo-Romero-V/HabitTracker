@@ -121,6 +121,21 @@ python scripts/vault_sync.py report
 
 Y/o configurar Git para que use el bash de Git for Windows.
 
+### Verificar que el hook esté instalado
+
+El hook versionado vive en `hooks/post-commit`, pero git solo ejecuta lo que
+está en `.git/hooks/`, que no viaja con `git clone`. Si
+`.vault-sync/change_report.json` no cambia tras un commit, lo más probable
+es que no esté instalado (en este repo no lo estuvo hasta el 28 de
+septiembre de 2026). Para instalarlo:
+
+```bash
+cp hooks/post-commit .git/hooks/post-commit
+chmod +x .git/hooks/post-commit
+```
+
+Si editas `hooks/post-commit`, vuelve a copiarlo.
+
 ---
 
 ## Comandos manuales (sin Claude)

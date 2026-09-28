@@ -3,7 +3,7 @@ status: draft
 type: decision
 layer: H3
 created: 2026-07-17
-code_path: ""
+code_path: app/backend/routes/api.php
 ---
 
 # API Contracts — Habit Tracker
@@ -129,3 +129,30 @@ code_path: ""
   flujo normal de la app usa `PATCH /api/v1/habits/{habit}` con
   `status=archived` para "dejar de seguir" un hábito sin perder su
   historial (ver [[habit]]).
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Contrato real. Reemplaza lo que el cuerpo anterior diga en contrario:
+
+- **`DELETE /habits/{habit}/logs/{log}`** = deshacer el registro de hoy. En
+  `fixed` devuelve el log revertido a `pending` en `data`; en `quota` borra
+  y devuelve `data: null`. Mensaje: "Registro deshecho correctamente."
+  Reemplaza "existen como borrado físico real" para logs (`DELETE
+  /habits/{habit}` sí sigue siendo borrado físico).
+- `POST`/`PATCH`/`DELETE` de logs: 422 si la fecha no es hoy (timezone del
+  usuario), si el hábito está archivado, si en `fixed` el día no está
+  programado o si la vigencia terminó. `occurrence_date` usa formato
+  `Y-m-d`. `metrics[*].habit_metric_id` debe pertenecer al hábito.
+- `GET /habits/{habit}/logs`: si el rango incluye hoy, garantiza que exista
+  la ocurrencia de hoy (ver [[habit-log]]).
+- `POST /habits/{habit}/unarchive`: 422 si la vigencia ya venció.
+- `GET /habits` y `GET /categories` aceptan `per_page` (1–100) y tienen
+  orden estable (`id` y `name, id`). Sin `ORDER BY`, Postgres devolvía las
+  filas en orden físico, que cambia tras cada UPDATE, y un hábito podía
+  saltar de página. El frontend (`apiFetchAllPages`) lee todas las páginas;
+  antes solo leía la primera y los elementos a partir del 16 no aparecían.
+- Validaciones nuevas: `quota_target` máximo 7; `target_value > 0`;
+  `recurrence_rule`/`quota_*` solo según el `recurrence_type` del hábito.
+- **401 garantizado:** un request sin autenticar recibe siempre el 401
+  `UNAUTHENTICATED`, con o sin `Accept: application/json`. Antes, sin ese
+  header, Laravel intentaba redirigir a una ruta `login` inexistente y
+  respondía 500 (`redirectGuestsTo(fn () => null)` en `bootstrap/app.php`).

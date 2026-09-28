@@ -72,3 +72,18 @@ Sin ciclo de vida propio — existe mientras el hábito `quantifiable` exista.
 [[architecture]] → Versionado de metas). `HabitMetricController` permite
 agregar/actualizar/eliminar métricas de un hábito ya creado; actualizar
 `target_value` inserta una versión nueva, nunca sobrescribe.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Estado real:
+- `target_value` debe ser **mayor que 0** (`gt:0`) al crear el hábito, al
+  agregar una métrica y al editar la meta. Con 0, la métrica se daba por
+  cumplida sin registrar nada y el índice del heatmap la contaba como 0 %.
+- No se puede borrar la última métrica de un hábito `quantifiable` (422).
+- Versionado idempotente (`HabitMetric::recordTargetVersion`): mismo
+  criterio que la cuota en [[habit]] (no duplica valores iguales; la misma
+  fecha se reemplaza). `effective_from` es "hoy" en el timezone del
+  usuario: antes una meta creada de noche nacía con fecha de mañana y el
+  log de hoy no encontraba meta vigente, así que **no podía completarse**.
+- En el formulario, el tipo y la unidad/moneda de una métrica existente
+  quedan bloqueados (la API solo acepta cambiar nombre y meta). Antes el
+  cambio se ignoraba y la meta se guardaba convertida con el tipo nuevo.

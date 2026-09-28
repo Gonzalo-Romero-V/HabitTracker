@@ -123,3 +123,43 @@ insertada por fecha de creación. `category_id` usa `nullOnDelete()` hacia
 [[category]]). La materialización de `HabitLog` `pending` (job mensual +
 bootstrap síncrono al crear un hábito `fixed`) queda pendiente para el
 incremento 2 — todavía no existe la tabla `habit_logs`.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Estado real tras la auditoría. Reemplaza lo que el cuerpo anterior diga en
+contrario (incluida la nota de implementación "la materialización queda
+pendiente para el incremento 2", ya resuelta hace tiempo).
+
+**Ciclo de vida** (`HabitLifecycleService`):
+- `archive`: borra las ocurrencias `pending` desde hoy en adelante y pasa a
+  `archived`. El job de cierres ignora hábitos archivados, así que el hueco
+  es neutro (nunca genera `missed`).
+- `unarchive`: vuelve a `active`, guarda `reactivated_on` (fecha en el
+  timezone del usuario), materializa desde hoy hasta fin de mes y recalcula
+  la racha. `StreakService` reinicia `current_streak` en `reactivated_on`;
+  `best_streak` conserva el historial. Devuelve 422 si la vigencia ya
+  venció (hay que actualizarla antes de reactivar).
+- El auto-archivado por vigencia vencida usa el mismo `archive()`.
+
+**Edición:**
+- Cambiar `recurrence_rule` o la vigencia regenera las `pending`
+  posteriores a hoy (`rescheduleFuture`); hoy y el pasado no se tocan.
+- `quota_target` máximo 7 (un hábito `quota` admite un solo log por día).
+  `recurrence_rule` solo se acepta en hábitos `fixed` y
+  `quota_target`/`quota_period` solo en `quota` (422 si no).
+- Versionado idempotente (`Habit::recordQuotaVersion`): no inserta si el
+  valor no cambió, y una segunda edición el mismo día reemplaza la versión
+  de ese día en vez de duplicar `effective_from`. `effective_from` es "hoy"
+  en el timezone del usuario (`User::today()`), nunca la fecha UTC del
+  servidor.
+
+**Fechas:**
+- `Habit::createdDateInUserTz()` es el DTSTART de la RRULE: antes se usaba
+  la fecha UTC de `created_at`, y un hábito creado de noche en
+  America/Guayaquil excluía su propio día de creación.
+- `duration_days = N` son N días contando el de creación (último día =
+  creación + N − 1). Antes daba un día de más.
+- Editar un hábito que vence hoy ya no da 422 (`after_or_equal`).
+
+**Racha `quota`:** ver [[vision]] → Actualización 2026-09-28. La meta de
+cada semana es la versión vigente al inicio de la semana; en la semana de
+creación, la vigente al final de ella.

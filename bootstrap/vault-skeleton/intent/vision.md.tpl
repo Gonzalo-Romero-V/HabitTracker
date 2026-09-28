@@ -12,7 +12,7 @@ Nota H1 — INTENT. Es la nota raíz del vault. Todo lo demás (entidades,
 decisiones, código) eventualmente refleja lo que digas acá.
 
 Reglas:
-  - Si no podés escribir el "Propósito central" en una oración, el H1 no
+  - Si no puedes escribir el "Propósito central" en una oración, el H1 no
     está listo y no deberías empezar a codear.
   - Las invariantes son reglas que NUNCA se rompen sin importar cambios
     técnicos. Si una invariante se vuelve negociable, es decisión H1, no H5.
@@ -22,7 +22,7 @@ Reglas:
 <!-- ¿Para quién existe este proyecto? ¿Qué problema resuelve? -->
 
 ## Propósito central
-<!-- Una oración. Si no podés escribirla, el H1 no está listo. -->
+<!-- Una oración. Si no puedes escribirla, el H1 no está listo. -->
 
 ## Invariantes de negocio
 <!--

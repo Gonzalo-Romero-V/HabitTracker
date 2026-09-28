@@ -12,25 +12,29 @@ Visión completa, invariantes de negocio y alcance: [`vault/intent/vision.md`](v
 
 ## Estado del proyecto
 
-**Scaffold inicial listo.** `app/backend` (Laravel 12 + Sanctum, migrado
-contra PostgreSQL) y `app/frontend` (Next.js App Router + Tailwind v4 +
-shadcn/ui sobre Radix) ya existen. Sin features de dominio todavía (no hay
-páginas ni endpoints de `habit`/`category`/etc.) — la sesión de modelado
-dejó documentado en el vault:
+**MVP implementado y en producción.** Funcionalidad disponible:
+
+- Cuenta con email/contraseña o Google, y onboarding (fecha de nacimiento,
+  primera categoría, primer hábito).
+- Hábitos binarios o cuantificables (métricas de conteo, duración y monto),
+  con recurrencia de días fijos (RRULE) o cuota semanal, vigencia opcional y
+  metas versionadas en el tiempo.
+- Pantallas **Hoy** (registro del día), **Calendario** (heatmap mensual),
+  **Memento Mori** (vida en semanas) y **Análisis** (consistencia, rachas,
+  tendencias, evolución por métrica).
+- Rachas calculadas en el backend, archivar y reactivar hábitos, y
+  recordatorios push vía FCM en Android (Capacitor).
+
+La fuente de verdad del dominio y las decisiones es el vault:
 
 - [`vault/intent/vision.md`](vault/intent/vision.md) — H1: visión, invariantes, alcance.
 - [`vault/intent/roadmap.md`](vault/intent/roadmap.md) — H1: evolución futura (módulo Proyectos), diferido.
-- [`vault/decisions/stack.md`](vault/decisions/stack.md) — H3: stack elegido y por qué.
-- [`vault/decisions/architecture.md`](vault/decisions/architecture.md) — H3: patrón, capas, convenciones.
-- [`vault/decisions/api-contracts.md`](vault/decisions/api-contracts.md) — H3: convenciones REST.
-- [`vault/decisions/environments.md`](vault/decisions/environments.md) — H3: parametrización vía `.env`, build web vs. mobile.
-- [`vault/decisions/design-system.md`](vault/decisions/design-system.md) — H3: Tailwind v4 + shadcn/ui, tema, responsive.
-- [`vault/decisions/i18n-copy.md`](vault/decisions/i18n-copy.md) — H3 🔒: español neutro EC, sin voseo.
-- [`vault/domain/`](vault/domain/) — H2: `user`, `category`, `habit`, `habit-metric`, `habit-log`, `habit-metric-log`, `device-token`, `reminder`.
+- [`vault/decisions/`](vault/decisions/) — H3: stack, arquitectura (incluidos los jobs), contratos de API, entornos, despliegue, design system, idioma 🔒.
+- [`vault/domain/`](vault/domain/) — H2: `user`, `category`, `habit`, `habit-metric`, `habit-log`, `habit-metric-log`, `device-token`, `reminder`, `habit-monthly-stat`, `user-daily-stat`.
 
-Antes de escribir código, revisar las "Decisiones pendientes" que sí siguen
-abiertas en `decisions/architecture.md` (testing frontend, hosting,
-paginación) y `decisions/design-system.md` (paleta de marca, safe-area).
+Decisiones todavía abiertas: testing del frontend
+(`decisions/architecture.md`) y paleta de marca y safe-area
+(`decisions/design-system.md`).
 
 ---
 
@@ -49,7 +53,18 @@ php artisan key:generate
 # Editar .env: DB_CONNECTION=pgsql, DB_DATABASE, DB_USERNAME, DB_PASSWORD
 php artisan migrate
 php artisan serve        # http://localhost:8000
+php artisan schedule:work   # en otra terminal: sin esto no hay ocurrencias, cierres ni recordatorios
 ```
+
+Tests del backend: corren contra PostgreSQL real, no SQLite. Necesitan una
+base vacía `habittracker_test` (se usan las credenciales de `.env`):
+
+```bash
+php artisan test
+```
+
+Si el scheduler estuvo detenido un tiempo, `php artisan habits:rebuild-stats`
+reconstruye las estadísticas diarias y mensuales de esos días (es idempotente).
 
 ### Frontend (`app/frontend`)
 

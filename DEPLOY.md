@@ -6,8 +6,7 @@
 >
 > Decisión de arquitectura correspondiente: `vault/decisions/environments.md`
 > (parametrización vía `.env`) y el ítem "Dónde se despliega" en
-> `vault/decisions/architecture.md` (pendiente hasta ahora — este documento
-> lo resuelve; falta reflejarlo en el vault, ver nota al final).
+> `vault/decisions/architecture.md`, resuelto en `vault/decisions/deploy.md`.
 
 ---
 
@@ -101,7 +100,7 @@ código (regla dura, ver `vault/decisions/environments.md`). Tabla completa:
 | `CORS_ALLOWED_ORIGINS` | Sí | No | Origen(es) del frontend — `http://localhost:3000` en dev, URL pública del túnel en producción |
 | `GOOGLE_CLIENT_ID` | Depende del proyecto GCP | Sí | Client ID (web) de Google Cloud Console — mismo valor que `NEXT_PUBLIC_GOOGLE_CLIENT_ID` |
 | `GOOGLE_CLIENT_ID_ANDROID` | Depende del proyecto GCP | Sí | Client ID (Firebase) para Sign-In nativo Android |
-| `FIREBASE_CREDENTIALS` | Sí (ruta o secreto) | Sí | Ver sección "Secretos fuera de git" abajo |
+| `FIREBASE_CREDENTIALS` | Opcional | Sí | Ruta al JSON de la cuenta de servicio. Vacío u omitido → `storage/app/firebase/service-account.json` (ver "Secretos fuera de git") |
 | `QUEUE_CONNECTION`, `CACHE_STORE`, `SESSION_DRIVER` | No | No | Ya en `database`, no requieren infraestructura extra (no hace falta Redis) |
 
 ### Frontend (`app/frontend/.env` — build web)
@@ -174,11 +173,13 @@ commiteados — no requieren `lang:publish` en una máquina nueva.
 cd app/backend
 php artisan serve --host=127.0.0.1 --port=8000
 
-# 2) Cola — despacha los Jobs de push (FCM) encolados por el scheduler
+# 2) Cola — hoy la app no encola jobs propios (los push se envían de forma
+#    síncrona dentro de habits:dispatch-due-reminders); se mantiene para
+#    la cola `database` de Laravel y jobs futuros
 cd app/backend
 php artisan queue:work --tries=1
 
-# 3) Scheduler — evalúa recordatorios/cierres/materialización (routes/console.php)
+# 3) Scheduler — OBLIGATORIO: ocurrencias, cierres, stats y recordatorios (routes/console.php)
 cd app/backend
 php artisan schedule:work
 
@@ -187,10 +188,52 @@ cd app/frontend
 PORT=3000 npm run start
 ```
 
-Los tres procesos de backend son obligatorios en producción: sin
-`queue:work` y `schedule:work` corriendo, los recordatorios push y el
-cierre/materialización mensual de hábitos (`vault/decisions/architecture.md`
-→ Jobs) simplemente no se disparan, aunque el resto de la API funcione.
+**El scheduler es obligatorio.** Sin `schedule:work` la API sigue
+respondiendo, pero no se materializan las ocurrencias del mes, los días
+vencidos nunca pasan a `missed`, las rachas y estadísticas no se
+actualizan y no sale ningún recordatorio push (`vault/decisions/architecture.md`
+→ Jobs). Esto pasó entre el 9 de agosto y el 28 de septiembre de 2026 y se
+notó como hábitos que "desaparecían" de Hoy. Desde entonces, "Hoy" crea la
+ocurrencia del día si falta y los jobs se recuperan solos al volver, pero
+los recordatorios y los cierres siguen dependiendo del scheduler.
+
+### Después de un tiempo con el scheduler detenido
+
+Los jobs recuperan solos el mes en curso y los últimos 7 días de
+estadísticas. Para huecos más largos, ejecuta una vez (es idempotente):
+
+```bash
+cd app/backend
+php artisan habits:evaluate-closures   # cierra días vencidos y recalcula rachas
+php artisan habits:rebuild-stats       # reconstruye estadísticas diarias y mensuales
+```
+
+Los días que nunca tuvieron ocurrencia por la falla quedan neutros: no se
+rellenan como fallados (`vault/intent/vision.md`).
+
+---
+
+## En esta máquina: scripts de servicios
+
+La producción actual (`habittracker.gonzaloromero.dev`) corre en la PC de
+desarrollo con dos scripts de la raíz del repo, ignorados por git porque
+contienen rutas locales:
+
+- **`iniciar_servicios.ps1`** — en orden: verifica PostgreSQL, aplica
+  `migrate --force` (si falla, no levanta nada más), y abre una terminal
+  para cada proceso: API (`127.0.0.1:8010`), queue worker, scheduler,
+  frontend (`:3010`) y Cloudflare Tunnel. El frontend se recompila
+  automáticamente si `src/`, `public/`, la configuración o algún `.env*`
+  son más nuevos que `.next/BUILD_ID`.
+- **`detener_servicios.ps1`** — libera los puertos 8010 y 3010, detiene el
+  túnel de Habit Tracker y los procesos php de Habit Tracker (queue worker,
+  scheduler). `artisan` se lanza con ruta absoluta justamente para poder
+  identificarlos sin tocar FinanceHub (puerto 8000, misma máquina).
+
+Para desplegar cambios: `detener_servicios.ps1` y luego
+`iniciar_servicios.ps1`. Un cambio de backend queda activo apenas se guarda
+(`php artisan serve` lee el código en cada request), así que las
+migraciones deben aplicarse enseguida.
 
 ---
 
@@ -252,9 +295,6 @@ esto y nada de tocar código:
 
 ## Nota sobre el vault
 
-Este documento resuelve el ítem pendiente "Dónde se despliega el Backend y
-el Frontend" de `vault/decisions/architecture.md`. Falta reflejarlo
-formalmente en el vault (nueva nota `decisions/deploy.md` + destildar ese
-pendiente) — corresponde hacerlo vía `/sync` después del commit de este
-cambio, no editado a mano acá (regla del proyecto: solo `/sync`/`apply`
-tocan el vault).
+La decisión de despliegue está en `vault/decisions/deploy.md` y el
+pendiente "Dónde se despliega" de `vault/decisions/architecture.md` está
+resuelto.

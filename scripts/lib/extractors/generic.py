@@ -245,7 +245,7 @@ Para promover este scaffold al catálogo:
          from .{slug} import {class_name}
          REGISTRY["{stack_id}"] = {class_name}
     4. Crear el archetype `bootstrap/stacks/{stack_id}.json` (ya hay un
-       _proposed_*.json hermano que podés renombrar).
+       _proposed_*.json hermano que puedes renombrar).
     5. Verificar que `python scripts/vault_sync.py facts` produce un
        facts.json coherente cuando este extractor está activo.
 
@@ -458,8 +458,8 @@ class {class_name}(ExtractorBase):
             facts["_scaffold_message"] = (
                 f"Stack '{detected}' detectado pero no registrado. "
                 f"Scaffolds generados: {proposed}. "
-                f"Revisalos, editá los TODOs, renombrá (quita _proposed_), "
-                f"agregá la clase a REGISTRY y el sistema lo incorpora al catálogo."
+                f"Revísalos, edita los TODOs, renombra (quita _proposed_), "
+                f"agrega la clase a REGISTRY y el sistema lo incorpora al catálogo."
             )
 
         return facts

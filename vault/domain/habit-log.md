@@ -143,3 +143,34 @@ Un solo servicio (`app/Services/StreakService.php`), con un método público
 `quota`) y persiste `current_streak`/`best_streak` en la fila del hábito.
 Se invoca después de cualquier mutación de `HabitLog` (create, update,
 delete) y desde el job de cierre de ocurrencias vencidas.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Estado real. Reemplaza lo que el cuerpo anterior diga en contrario.
+
+**Reglas de mutación** (`HabitLogService`, ya no en el Controller):
+- Solo la ocurrencia de HOY (timezone del usuario) se crea, modifica o
+  deshace; pasado o futuro → 422. `missed` es terminal de verdad (antes un
+  `PATCH` lo convertía en `completed`).
+- En `fixed` solo se registra un día programado por la RRULE (antes se
+  aceptaba cualquier fecha). Hábito archivado → 422.
+- **Deshacer (`DELETE`)**: en `fixed`, la ocurrencia vuelve a `pending`, se
+  borran sus valores de métricas y la respuesta devuelve el log en `data`.
+  La fila programada nunca desaparece; antes el borrado físico dejaba el día
+  sin fila, el job nunca lo marcaba `missed` y marcar+desmarcar protegía la
+  racha. En `quota` sigue siendo borrado físico (`data: null`). Esto
+  reemplaza "Un HabitLog admite borrado físico" del cuerpo.
+
+**Materialización resistente a fallas:**
+- `HabitOccurrenceMaterializer::ensureToday()` crea la `pending` de hoy de
+  un hábito `fixed` activo si falta. Se invoca desde `GET /stats/today` y
+  desde `GET /habits/{habit}/logs` cuando el rango incluye hoy. "Hoy" ya no
+  depende de que el job mensual haya corrido: con el scheduler caído desde
+  el 9 de agosto de 2026, septiembre quedó sin filas y todos los hábitos
+  fijos desaparecieron de la pantalla "Hoy".
+- El job mensual ya no materializa solo "al cierre de cada mes": en cada
+  corrida (cada hora) completa desde hoy hasta fin de mes, más el mes
+  siguiente completo si hoy es el último día. Nunca rellena días pasados.
+
+**Streak:** `StreakService::recalculate()` sigue siendo el único punto de
+cálculo. Se invoca tras crear, actualizar o deshacer un log, desde el job
+de cierres y al reactivar. Considera `reactivated_on` (ver [[habit]]).

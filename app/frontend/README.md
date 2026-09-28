@@ -1,34 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Habit Tracker — Frontend (Next.js)
 
-## Getting Started
+Cliente web de Habit Tracker: Next.js (App Router) + TypeScript +
+Tailwind v4 + shadcn/ui. El mismo código se empaqueta para Android con
+Capacitor. Visión general en el [README raíz](../../README.md).
 
-First, run the development server:
+## Estructura
+
+| Carpeta | Qué contiene |
+|---|---|
+| `src/app/(app)` | Pantallas autenticadas: `today`, `calendar`, `mori`, `analytics`, `habits`, `categories` |
+| `src/app/(auth)`, `src/app/(onboarding)` | Login/registro y onboarding |
+| `src/hooks` | Toda llamada a la API pasa por aquí (las páginas no hacen `fetch` directo) |
+| `src/lib/api.ts` | `apiFetch` (envelope `{ data }`, errores `ApiError`, header `X-Client-Timezone`) y `apiFetchAllPages` para listados paginados |
+| `src/components/custom` | Proveedores de formularios (hábito, categoría), `AuthGuard`, heatmap |
+
+Reglas clave:
+
+- Nada de lógica de negocio aquí: rachas, "debido hoy" y metas los decide
+  el backend (`vault/decisions/architecture.md`).
+- Los valores de métricas se muestran en unidad natural (minutos, monto) y
+  se convierten a segundos o centavos al enviarlos (`lib/habit-form-utils.ts`).
+- Todo el texto visible va en español neutro de Ecuador, con tú y sin
+  voseo (`vault/decisions/i18n-copy.md` 🔒).
+
+## Desarrollo
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env   # BACKEND_URL, NEXT_PUBLIC_GOOGLE_CLIENT_ID
+npm run dev            # http://localhost:3000 — proxea /api/* al backend
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Build web vs. build mobile (Capacitor, `BUILD_TARGET=mobile`):
+[`vault/decisions/environments.md`](../../vault/decisions/environments.md).
+Despliegue: [`DEPLOY.md`](../../DEPLOY.md).

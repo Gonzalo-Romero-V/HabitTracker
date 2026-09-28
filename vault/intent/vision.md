@@ -124,3 +124,26 @@ en [[user-daily-stat]].
   modela en H2 todavía; la intención conceptual y su impacto en el modelo
   actual de Habit están documentados en [[roadmap]]. Ver ahí antes de
   tomar decisiones de diseño que pudieran cerrarle la puerta.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Decisiones de producto tomadas por el humano durante la auditoría. Precisan
+invariantes de esta nota; lo que diga el cuerpo anterior en contrario
+queda reemplazado por esto:
+
+- **Solo se registra el día de hoy** (timezone del [[user]]). Crear,
+  modificar o deshacer un [[habit-log]] de una fecha pasada o futura es un
+  422. Consecuencia directa de "`missed` es terminal" y de "los períodos
+  cerrados no se re-evalúan": el pasado es inmutable y el futuro todavía no
+  ocurrió.
+- **Archivar y reactivar no es modo vacaciones.** El tiempo archivado es un
+  hueco neutro (no genera ocurrencias ni `missed`), pero al reactivar
+  `current_streak` arranca en 0; `best_streak` se conserva. El modo
+  vacaciones sigue fuera de alcance definitivo.
+- **Racha `quota`, semana en curso:** suma apenas alcanza la cuota (igual
+  que en `fixed`, donde completar hoy suma de inmediato); solo puede romper
+  la racha cuando la semana cierra. La semana de creación (o de
+  reactivación) es parcial: suma si se cumplió, pero nunca rompe.
+- **Días sin ocurrencia por una falla del sistema quedan neutros.** Si el
+  scheduler estuvo caído y un día nunca tuvo fila de [[habit-log]], no se
+  rellena retroactivamente como `missed` (la app ni siquiera se lo mostró
+  al usuario). Aplicado al hueco real del 1 al 27 de septiembre de 2026.

@@ -46,3 +46,23 @@ ataque mínima, cero configuración de red adicional para backend/DB.
   PostgreSQL — solo al puerto del frontend.
 - Cambiar de máquina es solo variables de `.env` + copiar los secretos
   fuera de git (ver checklist en `DEPLOY.md`) — nunca tocar código.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Proceso operativo real en la máquina de producción (scripts locales en la
+raíz del repo, ignorados por git: `iniciar_servicios.ps1` y
+`detener_servicios.ps1`; detalle en `DEPLOY.md`):
+
+- `iniciar_servicios.ps1`: PostgreSQL → `migrate --force` (aborta si falla)
+  → API (:8010) → queue worker → **scheduler** → frontend (:3010, se
+  recompila si `src/`, `public/`, la config o `.env*` son más nuevos que
+  `.next/BUILD_ID`) → Cloudflare Tunnel.
+- Antes el script no lanzaba el scheduler y solo compilaba el frontend si
+  no existía ningún build. Por eso producción servía un build del 6 de
+  agosto sin la corrección de paginación (`94ec506`) que evitaba que "Hoy"
+  escondiera hábitos.
+- `artisan` se invoca con ruta absoluta para que `detener_servicios.ps1`
+  identifique los procesos php de Habit Tracker sin tocar FinanceHub
+  (antes el queue worker nunca se detenía).
+- `php artisan serve` lee el PHP del disco en cada request: los cambios de
+  backend quedan activos al instante, así que las migraciones deben
+  aplicarse enseguida y no dejarse pendientes.

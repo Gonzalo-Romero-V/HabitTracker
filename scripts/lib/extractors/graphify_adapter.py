@@ -168,7 +168,7 @@ class GraphifyAdapter(ExtractorBase):
         if not graph_path.exists():
             raise FileNotFoundError(
                 f"graphify-out/graph.json no encontrado en {self.repo_path}.\n\n"
-                f"  Ejecutá primero:\n"
+                f"  Ejecuta primero:\n"
                 f"      pip install graphifyy\n"
                 f"      graphify extract . --no-cluster\n\n"
                 f"  La flag --no-cluster activa solo Pass 1 (AST tree-sitter,\n"

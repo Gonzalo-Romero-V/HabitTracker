@@ -55,7 +55,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Stacks disponibles: ver bootstrap/stacks/*.json.\n"
-            "Para stacks no listados, usá --stack generic y el extractor\n"
+            "Para stacks no listados, usa --stack generic y el extractor\n"
             "detectará el lenguaje y dejará propuestas _proposed_<stack>.* en\n"
             "bootstrap/stacks/ y scripts/lib/extractors/ para que las promovás."
         ),
@@ -134,7 +134,7 @@ def validate(args: argparse.Namespace) -> tuple[Path, Path]:
         errors.append(
             f"--vault-path ya existe: {vault}\n"
             f"    El bootstrapper rechaza sobreescribir un vault.\n"
-            f"    Elegí otra ruta o borrala manualmente antes de reintentar."
+            f"    Elige otra ruta o bórrala manualmente antes de reintentar."
         )
 
     # Cwd debe ser un repo git (hook se instala en .git/hooks/)
@@ -143,7 +143,7 @@ def validate(args: argparse.Namespace) -> tuple[Path, Path]:
     if not git_dir.exists():
         errors.append(
             f"El cwd no es un repositorio git: {repo_root}\n"
-            f"    Corré 'git init' antes del bootstrapper."
+            f"    Corre 'git init' antes del bootstrapper."
         )
 
     # Project name básico

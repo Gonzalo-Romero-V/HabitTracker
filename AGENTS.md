@@ -49,6 +49,8 @@ ajustar un README), los pasos 3–5 son opcionales — usar criterio.
 | Estilos globales, tema claro/oscuro, tokens de color, responsive | `decisions/design-system.md` |
 | Feature de **Proyectos** (Project/Phase/Activity) | `intent/roadmap.md` primero — no está modelado en H2 todavía |
 | Feature cross-entidad (ej. dashboard de estadísticas) | todas las `domain/*.md` involucradas |
+| Jobs programados (ocurrencias, cierres, stats, recordatorios) | `domain/habit-log.md` + `domain/habit-monthly-stat.md` + `domain/user-daily-stat.md` + `decisions/architecture.md` (Jobs) |
+| Arranque/operación de producción (servicios, scheduler, build) | `decisions/deploy.md` + `DEPLOY.md` |
 
 Si una nota referenciada no existe → **preguntar al humano**, no inventar.
 
@@ -144,7 +146,7 @@ Más detalle en `USAGE.md` (cara dev) y `vault/SYSTEM.md` (cara agente).
 
 ### Vault y código
 
-- **Vault**: `C:/Users/Gonzalo/Dev/Habit Tracker/vault`
+- **Vault**: `./vault` (dentro del repo, ruta relativa en `vault_sync.config.json`)
 - **Sistema vault-sync**: `vault/SYSTEM.md` (locked, leer una vez por sesión)
 - **Manual de uso humano**: `USAGE.md`
 - **Engine determinista**: `scripts/vault_sync.py` (stdlib only, 0 deps externas)
@@ -174,55 +176,45 @@ que toque más de un archivo debería respetar esas convenciones.
 
 ---
 
-## Adaptación al proyecto — estado
+## Estado del proyecto
 
-Este `AGENTS.md` se generó al bootstrappear con `--stack nextjs-laravel` el
-`2026-07-17`. La adaptación inicial (sesión de contexto/requerimientos,
-sin código todavía) ya se completó:
+Bootstrappeado con `--stack nextjs-laravel` el `2026-07-17`. **El MVP está
+implementado y en producción** (`habittracker.gonzaloromero.dev`, servido
+desde esta misma PC). El vault ya no es solo modelado: cada nota de
+`domain/` tiene `code_path` y secciones de implementación, y la más
+reciente, "Actualización 2026-09-28", refleja el estado real tras la
+auditoría de lógica. Si el cuerpo de una nota contradice una sección
+"Actualización" posterior, manda la sección más reciente.
 
-- `vault/intent/vision.md` — H1 completa: visión, propósito, invariantes de
-  negocio, usuarios, fuera de alcance (definitivo vs. diferido).
-- `vault/intent/roadmap.md` — H1: visión conceptual del futuro módulo
-  Proyectos (Project→Phase→Activity, PMBOK/WBS) y qué seams quedaron
-  deliberadamente abiertos en el modelo actual de Habit para no bloquearlo.
-- `vault/decisions/stack.md` — H3 completa: Next.js + Laravel + Sanctum
-  (tokens) + Postgres + Capacitor (mobile) + FCM/`@capacitor-firebase/messaging`.
-- `vault/decisions/architecture.md` — H3 completa: patrón MVC/Services,
-  separación de responsabilidades, naming, auth, errores. El empaquetado
-  de Capacitor **ya está decidido** (`BUILD_TARGET`, ver
-  `decisions/environments.md`) — solo queda pendiente testing frontend,
-  hosting y paginación.
-- `vault/decisions/api-contracts.md` — H3: convenciones REST, envelope
-  `{ data, mensaje }` (español), header `X-Client-Timezone`.
-- `vault/decisions/environments.md` — H3: parametrización vía `.env`,
-  build web (rewrites) vs. mobile (export estático), regla de `env()` en
-  Laravel, limitación Capacitor+localhost. Precedente: financehub.
-- `vault/decisions/design-system.md` — H3: Tailwind v4 + shadcn/ui, tokens
-  OKLCH, tema claro/oscuro (`next-themes` + View Transitions), responsive
-  mobile-first. Precedente: FarMedic. Paleta de marca todavía sin definir.
-- `vault/decisions/i18n-copy.md` — H3 🔒 **locked**: español neutro EC, tú,
-  prohibido voseo argentino y "usted". Aplica a la app entera y a este
-  propio repo (ya auditado y purgado en esta sesión).
-- `vault/domain/*.md` — 8 entidades H2: `user`, `category`, `habit`,
-  `habit-metric`, `habit-log`, `habit-metric-log`, `device-token`,
-  `reminder`.
-- `vault/INDEX.md` — wikilinks y tabla "tarea → notas obligatorias"
-  completos con los flujos reales del dominio (14 notas H1–H3 + 8 H2).
+- **Backend** (`app/backend`): Laravel 12 + Sanctum + PostgreSQL. Lógica de
+  dominio en `app/Services/` (`HabitLogService`, `HabitLifecycleService`,
+  `StreakService`, `HabitOccurrenceMaterializer`, consolidadores de stats).
+- **Frontend** (`app/frontend`): Next.js App Router, 4 pestañas (Hoy,
+  Calendario, Memento Mori, Análisis) + onboarding; el mismo build se
+  empaqueta para Android con Capacitor.
+- **Jobs**: `routes/console.php`. El scheduler (`schedule:work`) es
+  obligatorio: sin él no se materializan ocurrencias, no se cierran días ni
+  salen recordatorios. Ver `vault/decisions/architecture.md` → Jobs.
+- **Tests backend**: `php artisan test` contra PostgreSQL
+  (`habittracker_test`), nunca SQLite. Ver `decisions/architecture.md`.
+- **Decisiones que siguen abiertas**: testing del frontend
+  (`decisions/architecture.md`), paleta de marca y safe-area
+  (`decisions/design-system.md`), meta descendente en métricas
+  (`domain/habit-metric-log.md`).
 
-**Aún no hay código** (H4–H5 vacíos) — este vault es el resultado de la
-sesión de modelado, no de una extracción desde un repo existente. La
-próxima sesión que empiece a codear debería:
+### Producción corre en esta máquina — cuidado
 
-1. Confirmar los ítems de "Decisiones pendientes" que sí siguen abiertos
-   en `decisions/architecture.md` (testing frontend, hosting, paginación) y
-   en `decisions/design-system.md` (paleta de marca, safe-area).
-2. Scaffoldear `Backend/` (Laravel) y `Frontend/` (Next.js) según
-   `decisions/stack.md`, aplicando desde el primer commit las convenciones
-   de `decisions/environments.md` (nada hardcodeado) y `decisions/i18n-copy.md`
-   (todo copy en español neutro EC).
-3. Correr `git commit` del scaffold inicial y luego `/sync` — el hook
-   generará `change_report.json`/`facts.json` y recién ahí el extractor
-   `nextjs-laravel` empieza a producir señal real.
+- `iniciar_servicios.ps1` / `detener_servicios.ps1` (raíz, ignorados por
+  git) levantan y detienen todo. Ver `DEPLOY.md` y `decisions/deploy.md`.
+- La base `HabitTracker` son **datos reales**. Nunca escribir en ella para
+  probar: usar `habittracker_test`.
+- `php artisan serve` lee el PHP del disco en cada request: un cambio de
+  backend queda activo al instante. Las migraciones se aplican enseguida,
+  nunca se dejan pendientes.
+- Los cambios de frontend solo llegan a producción al reiniciar los
+  servicios, porque el script recompila cuando detecta cambios.
+- FinanceHub corre en la misma máquina (puerto 8000): nunca detener sus
+  procesos.
 
 ---
 

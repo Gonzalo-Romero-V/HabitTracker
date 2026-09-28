@@ -44,3 +44,18 @@ no esté cerrado.
   sola métrica cumplida si el hábito tiene varias.
 
 ## Notas de implementación
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Implementación (`HabitLogService::saveAndEvaluate`, validado en
+`Store/UpdateHabitLogRequest`):
+- Cada `habit_metric_id` debe pertenecer al hábito del log
+  (`exists ... where habit_id`) y no repetirse. Antes se aceptaba cualquier
+  id, incluso de métricas de otro usuario.
+- `metrics` está prohibido en hábitos `binary`.
+- Un hábito sin métricas nunca evalúa como `completed` (guard en
+  `HabitCompletionService`).
+- La meta es siempre ascendente (`value >= target_value`); la meta
+  descendente sigue sin soportarse.
+- El frontend muestra y captura valores en unidad natural (minutos, monto) y
+  convierte a segundos o centavos al enviar, también en el detalle del
+  hábito (antes esa pantalla trabajaba con valores crudos).

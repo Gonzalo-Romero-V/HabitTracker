@@ -83,3 +83,15 @@ decide con el shape real de `Activity` sobre la mesa, no antes.
   existe `ReminderPolicy` dedicada, mismo patrón que `HabitMetric`.
   Verificado IDOR: 403 si el hábito no es propio, 404 si se intenta anidar
   un `reminder` ajeno bajo un hábito propio (binding `->scoped()`).
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+- **Los push no se estaban enviando en producción:** `FIREBASE_CREDENTIALS=`
+  vacío en `.env` hacía que `env()` devolviera `""` en vez de la ruta por
+  defecto (`storage/app/firebase/service-account.json`), y resolver el
+  `PushSender` fallaba con "Unable to determine the Firebase Project ID".
+  `config/firebase.php` ahora usa `env(...) ?: ruta_por_defecto`.
+- Tampoco se disparaban porque el scheduler no corría (ver
+  [[architecture]] → Jobs).
+- `DispatchDueReminders` precarga solo los logs de los últimos 8 días (antes
+  cargaba el historial completo de cada hábito cada minuto) y corre con
+  `withoutOverlapping`.

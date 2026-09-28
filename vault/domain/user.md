@@ -107,3 +107,14 @@ Actualización: `google_id` (nullable, único) agregado a la migración de
 `users`, y `password` pasó a nullable — soportan cuentas creadas vía
 "Continuar con Google" sin password propio (ver [[stack]] para el
 mecanismo de verificación del token).
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+- `User::today()` devuelve la fecha de hoy en el timezone del usuario y es
+  la única fuente de "hoy" en el backend. `Date::today()` (UTC del
+  servidor) quedó prohibido: causaba los bugs de fechas de la auditoría.
+- La vinculación automática con Google exige además `email_verified = true`
+  en el ID token. La regla del cuerpo se apoya en que Google verificó el
+  correo, y antes no se comprobaba.
+- Nota de implementación obsoleta en el cuerpo: `timezone` y `google_id` ya
+  existen desde hace tiempo (ver las actualizaciones anteriores de esta
+  nota).

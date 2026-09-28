@@ -8,7 +8,7 @@
 #   - No asume paths absolutos del host: usa `git rev-parse --show-toplevel`.
 #
 # Instalación: la copia la realiza bootstrap/init_vault.py durante el bootstrap.
-# Si lo instalás a mano, asegurate de `chmod +x .git/hooks/post-commit`.
+# Si lo instalas a mano, asegúrate de `chmod +x .git/hooks/post-commit`.
 
 set +e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -38,7 +38,7 @@ mkdir -p .vault-sync
 RC=$?
 
 if [ $RC -eq 0 ]; then
-  echo "[post-commit] change_report.json actualizado. Ejecutá /sync en Claude Code para propagar."
+  echo "[post-commit] change_report.json actualizado. Ejecuta /sync en Claude Code para propagar."
 else
   echo "[post-commit] vault_sync salió con código $RC. Revisar .vault-sync/post-commit.log"
 fi

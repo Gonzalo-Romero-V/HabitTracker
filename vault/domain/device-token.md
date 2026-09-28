@@ -68,3 +68,14 @@ error de FCM) o el usuario cierra sesión en ese dispositivo.
   nunca ejecuta este código. Permiso denegado o fallo de red: silencioso,
   nunca bloquea el resto de la app — confirmado con build de Gradle real
   (`assembleDebug`) con las credenciales de Firebase reales presentes.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Resuelve dos pendientes del cuerpo:
+- **Token no registrado → se elimina.** `DispatchDueReminders` captura
+  `Kreait\Firebase\Exception\Messaging\NotFound` (FCM "no registrado") y
+  borra el `DeviceToken`; los demás errores se siguen logueando sin borrar.
+- **Cerrar sesión borra el token del dispositivo.** El cliente guarda el
+  `id` devuelto por `POST /device-tokens` y, al cerrar sesión, hace
+  `DELETE /device-tokens/{id}` antes de revocar el token de sesión. Antes el
+  dispositivo seguía recibiendo los recordatorios de la cuenta que ya había
+  cerrado sesión.

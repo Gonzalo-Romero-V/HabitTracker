@@ -67,3 +67,18 @@ desde [[habit-log]], nunca desde este agregado.
   usuario (mismo guard que la materialización de `fixed`); confirmado con
   una corrida real del comando fuera de esa condición (0 stats
   consolidados, comportamiento esperado, no bug).
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Estado real. Reemplaza "se consolida cuando hoy es el último día del mes":
+
+- El mes se consolida **después de cerrar**: el día 1 (en el timezone del
+  usuario) en cada corrida del job, y cualquier otro día si la fila del mes
+  anterior todavía falta (servidor apagado el día 1). Consolidar el último
+  día, con ese día todavía en curso, dejaba sus completados y fallados
+  fuera del agregado para siempre.
+- Se consolidan **todos** los hábitos que existían ese mes, activos o
+  archivados (antes solo activos). En consecuencia,
+  `/stats/monthly-trend` también incluye hábitos archivados, que son
+  historia real de ese mes.
+- Recuperación de huecos: `php artisan habits:rebuild-stats` (ver
+  [[user-daily-stat]]).

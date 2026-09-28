@@ -100,3 +100,29 @@ backfill retroactivo todavía.
   el heatmap del calendario y las vistas de Memento Mori (día y semana —
   la agregación semanal se hace en el cliente agrupando los días
   devueltos, no hay endpoint semanal separado).
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Estado real. Reemplaza lo que el cuerpo anterior diga en contrario:
+
+- **`weighted_completed_count`** (migración `2026_07_24`, no documentada
+  hasta ahora): índice fraccionario en [0, `due_count`]. Un hábito
+  cuantificable a medio camino suma parcial (8 de 10 vasos = 0,8). Colorea
+  el heatmap de Calendario y Memento Mori; `completed_count` sigue siendo
+  todo-o-nada. Con varias métricas se promedia el ratio de cada una.
+- **Días cerrados cuentan también hábitos archivados después:** sus logs
+  de ese día son historia real. Antes archivar un hábito hoy reescribía el
+  agregado de ayer. El conteo en vivo de hoy (`/stats/today`) sigue
+  filtrando solo activos.
+- **`due_count = 0` no genera fila** (y se borra si existía). Antes se
+  creaban filas en 0, contradiciendo la regla "sin dato ≠ 0 %". Se
+  limpiaron 5 filas viejas en producción.
+- **Consolidación:** el job de cierres reconsolida los últimos 7 días
+  cerrados, no solo "ayer", así que un día con el servidor apagado se
+  recupera solo. Para huecos más viejos existe
+  `php artisan habits:rebuild-stats` (idempotente): reconstruye todos los
+  días y meses cerrados desde el historial. Reemplaza "no hay comando de
+  backfill retroactivo todavía". Se usó para recuperar el hueco del 10 de
+  agosto al 27 de septiembre de 2026.
+- Memento Mori pide el historial en ventanas de 730 días, respetando el
+  límite de 2 años por request. Antes una cuenta con más de 2 años veía un
+  error.

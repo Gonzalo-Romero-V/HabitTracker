@@ -178,3 +178,43 @@ no está abierto: ver [[deploy]] y `DEPLOY.md`. Resumen: backend +
 PostgreSQL solo en `127.0.0.1` de la máquina de despliegue, nunca
 expuestos; únicamente el frontend (build web) se expone al público vía
 Cloudflare Tunnel con hostname fijo.
+
+## Actualización 2026-09-28 — auditoría de lógica (commit 466e1f3)
+Estado real. Reemplaza lo que el cuerpo anterior diga en contrario:
+
+**Services nuevos:** `HabitLogService` (mutaciones de logs con sus reglas,
+ver [[habit-log]]) y `HabitLifecycleService` (archivar, reactivar y
+reprogramar, ver [[habit]]). Los controllers de logs y hábitos quedaron
+como delegadores.
+
+**Jobs:** el scheduler (`php artisan schedule:work`) es **obligatorio**. No
+corrió desde el 9 de agosto hasta el 28 de septiembre de 2026 porque el
+script de arranque no lo lanzaba. Todos los jobs son idempotentes y se
+recuperan solos si el servidor estuvo apagado (el servidor es una PC que no
+está encendida 24/7):
+
+| Comando | Frecuencia | Qué hace |
+|---|---|---|
+| `habits:materialize-month` | cada hora | Materializa desde hoy hasta fin de mes (más el mes siguiente el último día) y consolida el mes cerrado (día 1, o cuando falte la fila) |
+| `habits:evaluate-closures` | cada 30 min | `pending` vencidos → `missed` (solo hábitos activos), rachas, stats de los últimos 7 días, auto-archivado por vigencia |
+| `habits:dispatch-due-reminders` | cada minuto | Recordatorios push |
+| `habits:rebuild-stats` | manual | Reconstruye todos los agregados cerrados desde el historial |
+
+Todos corren con `withoutOverlapping`. Reemplaza "materializa el mes
+siguiente al cierre de cada mes" y "consolida ayer". Los push se envían de
+forma síncrona dentro del comando; el queue worker no tiene jobs propios de
+la app.
+
+**Timezone:** `User::today()` es la única fuente de "hoy"; `Date::today()`
+queda prohibido. El gotcha de `parse($valor, $tz)` se extiende a
+comparaciones: nunca comparar con `lt`/`equalTo` instantes construidos en
+timezones distintos (se usan strings `Y-m-d`).
+
+**Testing backend:** PHPUnit contra PostgreSQL real (base
+`habittracker_test`, `phpunit.xml`), no SQLite: la app compara columnas
+`date` por igualdad y SQLite las guarda como `Y-m-d H:i:s`.
+`tests/Feature/HabitLogicTest.php` cubre las 24 regresiones de esta
+auditoría. El testing del frontend sigue pendiente.
+
+**Pendiente resuelto:** "Credenciales de Firebase (FCM) — todavía no
+existen" ya no aplica (proyecto `habittracker-7be67`; ver [[reminder]]).
