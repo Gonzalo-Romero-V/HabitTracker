@@ -103,12 +103,9 @@ export default function AnalyticsPage() {
   );
 
   // Consistencia por hábito: completed / (completed + missed) sobre los
-  // logs devueltos por listHabitLogs (hasta 30, los más recientes). Se
+  // logs de la ventana de 30 días (mismo rango `from`/`to` de arriba). Se
   // excluyen los `pending` del denominador porque todavía no están
-  // resueltos (contarlos penalizaría hábitos nuevos u ocurrencias de hoy
-  // sin check-off). Esto es una aproximación a "las últimas ~30
-  // ocurrencias registradas", no una ventana calendario estricta de 30
-  // días — se documenta también en la UI.
+  // resueltos (contarlos penalizaría ocurrencias de hoy sin check-off).
   const habitConsistency = useMemo(
     () =>
       habits.map((h) => {
@@ -189,8 +186,8 @@ export default function AnalyticsPage() {
               </ul>
             )}
             <p className="text-xs text-muted-foreground">
-              Se calcula sobre los últimos registros disponibles de cada hábito (hasta 30), no sobre un calendario
-              estricto de 30 días.
+              Se calcula sobre los últimos 30 días: completados frente a completados más fallados (los pendientes no
+              cuentan).
             </p>
           </section>
 

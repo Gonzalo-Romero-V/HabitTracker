@@ -8,6 +8,7 @@ use App\Services\Push\PushSender;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use Kreait\Firebase\Exception\Messaging\NotFound;
 use Throwable;
 
 /**
@@ -27,7 +28,15 @@ class DispatchDueReminders extends Command
 
         Reminder::query()
             ->whereHas('habit', fn ($q) => $q->where('status', 'active'))
-            ->with(['habit.user.deviceTokens', 'habit.logs', 'habit.quotaVersions'])
+            // Solo los logs recientes (la semana en curso cabe en 8 días
+            // hacia atrás, y los `pending` futuros ya materializados no
+            // estorban) — antes se cargaba el historial completo de cada
+            // hábito en cada corrida por minuto.
+            ->with([
+                'habit.user.deviceTokens',
+                'habit.logs' => fn ($q) => $q->where('occurrence_date', '>=', now()->subDays(8)->toDateString()),
+                'habit.quotaVersions',
+            ])
             ->chunkById(200, function ($reminders) use ($sender, &$dispatched) {
                 foreach ($reminders as $reminder) {
                     if (! $this->isDue($reminder) || ! $this->habitStillNeedsIt($reminder->habit)) {
@@ -44,6 +53,15 @@ class DispatchDueReminders extends Command
                                 'No olvides completar tu hábito hoy.',
                             );
                             $dispatched++;
+                        } catch (NotFound $e) {
+                            // FCM responde "no registrado": el token murió
+                            // (app desinstalada, token rotado). Se elimina en
+                            // vez de reintentarlo para siempre (domain/
+                            // device-token.md → Reglas de negocio).
+                            Log::info('Token de push no registrado, eliminado', ['device_token_id' => $deviceToken->id]);
+                            $deviceToken->delete();
+
+                            continue;
                         } catch (Throwable $e) {
                             Log::warning('Fallo al despachar push de recordatorio', [
                                 'device_token_id' => $deviceToken->id,

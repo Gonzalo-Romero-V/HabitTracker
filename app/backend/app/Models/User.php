@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -56,5 +57,15 @@ class User extends Authenticatable
     public function deviceTokens(): HasMany
     {
         return $this->hasMany(DeviceToken::class);
+    }
+
+    /**
+     * "Hoy" (Y-m-d) en el timezone del usuario — nunca `Date::today()`, que
+     * usa el timezone del servidor (UTC) y corre la fecha para cualquier
+     * usuario fuera de UTC (ver intent/vision.md → invariantes).
+     */
+    public function today(): string
+    {
+        return CarbonImmutable::now($this->timezone)->toDateString();
     }
 }

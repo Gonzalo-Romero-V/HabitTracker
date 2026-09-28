@@ -33,7 +33,7 @@ class HabitMetric extends Model
 
     public function currentTargetVersion(): ?HabitMetricTargetVersion
     {
-        return $this->targetVersions()->orderByDesc('effective_from')->first();
+        return $this->targetVersions()->orderByDesc('effective_from')->orderByDesc('id')->first();
     }
 
     /**
@@ -45,6 +45,26 @@ class HabitMetric extends Model
         return $this->targetVersions()
             ->whereDate('effective_from', '<=', $date)
             ->orderByDesc('effective_from')
+            ->orderByDesc('id')
             ->first();
+    }
+
+    /**
+     * Registra una nueva versión de `target_value` vigente desde
+     * `$effectiveFrom` — mismo criterio que Habit::recordQuotaVersion(): no
+     * inserta si el valor no cambió, y reemplaza la versión del mismo día
+     * en vez de duplicar `effective_from`.
+     */
+    public function recordTargetVersion(float $targetValue, string $effectiveFrom): void
+    {
+        $current = $this->currentTargetVersion();
+        if ($current && (float) $current->target_value === $targetValue) {
+            return;
+        }
+
+        $this->targetVersions()->updateOrCreate(
+            ['effective_from' => $effectiveFrom],
+            ['target_value' => $targetValue],
+        );
     }
 }

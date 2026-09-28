@@ -20,8 +20,9 @@ type Props = {
    * `null` si no tiene ninguno. */
   reminderTime: string | null;
   today: string;
-  /** Log resultante tras crear/actualizar/borrar (`null` si se deshizo el
-   * check-off) — el padre lo aplica localmente en vez de recargar todo. */
+  /** Log resultante tras crear/actualizar/deshacer (`null` si se deshizo el
+   * registro de un hábito `quota`, que se borra) — el padre lo aplica
+   * localmente en vez de recargar todo. */
   onChanged: (log: HabitLogEntry | null) => void;
   onOpenEdit: (habit: Habit) => void;
   onError: (message: string) => void;
@@ -49,8 +50,7 @@ export function HabitTodayCard({
     setIsSaving(true);
     try {
       if (isCompleted && log) {
-        await deleteHabitLog(habit.id, log.id);
-        onChanged(null);
+        onChanged(await deleteHabitLog(habit.id, log.id));
       } else if (log) {
         onChanged(await updateHabitLog(habit.id, log.id));
       } else {
@@ -94,8 +94,7 @@ export function HabitTodayCard({
    * todavía, se convierte desde el valor crudo del log (segundos/centavos). */
   function currentValue(metric: HabitMetric): number {
     if (metricValues[metric.id] !== undefined) return metricValues[metric.id];
-    const rawFromLog = Number(log?.metrics.find((lm) => lm.habit_metric_id === metric.id)?.value ?? 0);
-    return fromStoredTargetValue(metric.metric_type, rawFromLog);
+    return savedValue(metric);
   }
 
   function handleStep(metric: HabitMetric, delta: number, e: React.MouseEvent) {
@@ -110,7 +109,16 @@ export function HabitTodayCard({
     setMetricValues((prev) => ({ ...prev, [metric.id]: Number.isNaN(parsed) ? 0 : parsed }));
   }
 
+  /** Valor guardado en el log (unidad natural), sin la edición local. */
+  function savedValue(metric: HabitMetric): number {
+    const rawFromLog = Number(log?.metrics.find((lm) => lm.habit_metric_id === metric.id)?.value ?? 0);
+    return fromStoredTargetValue(metric.metric_type, rawFromLog);
+  }
+
   function handleInputCommit(metric: HabitMetric) {
+    // Solo si cambió: enfocar y salir del campo sin tocarlo creaba un log
+    // vacío (y en `quota` lo contaba como "debido" ese día).
+    if (currentValue(metric) === savedValue(metric)) return;
     submitMetrics({ [metric.id]: currentValue(metric) });
   }
 

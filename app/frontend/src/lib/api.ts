@@ -47,6 +47,11 @@ const API_BASE =
   process.env.NEXT_PUBLIC_BUILD_TARGET === "mobile" ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1` : "/api/v1";
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return (await apiFetchBody<{ data: T }>(path, options)).data;
+}
+
+/** Request autenticado que devuelve el body completo (incluido `meta`). */
+async function apiFetchBody<B>(path: string, options: RequestInit = {}): Promise<B> {
   const token = getStoredToken();
 
   const headers = new Headers(options.headers);
@@ -62,5 +67,22 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     throw new ApiError(response.status, body as ApiErrorBody);
   }
 
-  return (body as { data: T }).data;
+  return body as B;
+}
+
+/** GET de un listado paginado (`meta.last_page`, ver decisions/
+ * api-contracts.md) trayendo TODAS las páginas. `apiFetch` descarta `meta`,
+ * así que usarlo sobre un listado paginado devolvía solo la primera página
+ * en silencio (los hábitos/categorías a partir del nº 16 desaparecían). */
+export async function apiFetchAllPages<T>(path: string): Promise<T[]> {
+  const separator = path.includes("?") ? "&" : "?";
+  const items: T[] = [];
+
+  for (let page = 1; ; page++) {
+    const { data, meta } = await apiFetchBody<{ data: T[]; meta?: { last_page: number } }>(
+      `${path}${separator}per_page=100&page=${page}`,
+    );
+    items.push(...data);
+    if (!meta || page >= meta.last_page) return items;
+  }
 }

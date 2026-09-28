@@ -50,7 +50,10 @@ return [
              *
              */
 
-            'credentials' => env('FIREBASE_CREDENTIALS', storage_path('app/firebase/service-account.json')),
+            // `?:` y no el default de env(): `FIREBASE_CREDENTIALS=` vacío en
+            // .env devuelve "" (no null), anulaba la ruta por defecto y
+            // ningún push llegaba a enviarse.
+            'credentials' => env('FIREBASE_CREDENTIALS') ?: storage_path('app/firebase/service-account.json'),
 
             /*
              * ------------------------------------------------------------------------

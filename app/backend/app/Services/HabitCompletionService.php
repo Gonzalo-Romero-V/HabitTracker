@@ -24,7 +24,10 @@ class HabitCompletionService
         $metricLogsByMetricId = $log->metricLogs()->get()->keyBy('habit_metric_id');
         $occurrenceDate = $log->occurrence_date->toDateString();
 
-        $allMet = $habit->metrics->every(function ($metric) use ($metricLogsByMetricId, $occurrenceDate) {
+        // Sin métricas no hay meta que alcanzar — `every()` sobre una
+        // colección vacía devolvería true y completaría el log con
+        // cualquier PATCH.
+        $allMet = $habit->metrics->isNotEmpty() && $habit->metrics->every(function ($metric) use ($metricLogsByMetricId, $occurrenceDate) {
             $metricLog = $metricLogsByMetricId->get($metric->id);
             if (! $metricLog) {
                 return false;

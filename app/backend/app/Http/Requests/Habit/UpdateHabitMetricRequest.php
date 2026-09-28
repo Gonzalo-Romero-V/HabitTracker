@@ -21,7 +21,7 @@ class UpdateHabitMetricRequest extends FormRequest
             'name' => ['sometimes', 'string', 'max:255'],
             // target_value: si viene, inserta una nueva versión (ver
             // architecture.md → Versionado de metas), nunca sobrescribe.
-            'target_value' => ['sometimes', 'numeric', 'min:0'],
+            'target_value' => ['sometimes', 'numeric', 'gt:0'],
         ];
     }
 

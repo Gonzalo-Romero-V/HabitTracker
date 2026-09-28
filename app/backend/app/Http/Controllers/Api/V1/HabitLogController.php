@@ -8,17 +8,23 @@ use App\Http\Requests\Habit\UpdateHabitLogRequest;
 use App\Http\Resources\HabitLogResource;
 use App\Models\Habit;
 use App\Models\HabitLog;
-use App\Services\HabitCompletionService;
-use App\Services\StreakService;
-use Carbon\CarbonImmutable;
+use App\Services\HabitLogService;
+use App\Services\HabitOccurrenceMaterializer;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 
 class HabitLogController extends Controller
 {
-    public function index(Request $request, Habit $habit)
+    public function index(Request $request, Habit $habit, HabitOccurrenceMaterializer $materializer)
     {
         $this->authorize('view', $habit);
+
+        // Si el rango pedido incluye hoy, garantizar que la ocurrencia de
+        // hoy exista aunque el job mensual no haya corrido (ver
+        // HabitOccurrenceMaterializer::ensureToday()).
+        $today = $habit->user->today();
+        if ($request->query('from', $today) <= $today && $request->query('to', $today) >= $today) {
+            $materializer->ensureToday($habit);
+        }
 
         // `from`/`to` filtran por `occurrence_date` (rango cerrado) — sin
         // esto, un hábito con logs materializados hasta fin de mes (ver
@@ -46,28 +52,11 @@ class HabitLogController extends Controller
         ]);
     }
 
-    public function store(StoreHabitLogRequest $request, Habit $habit)
+    public function store(StoreHabitLogRequest $request, Habit $habit, HabitLogService $logs)
     {
         $this->authorize('update', $habit);
 
-        $occurrenceDate = $request->validated('occurrence_date')
-            ?? CarbonImmutable::now($request->user()->timezone)->toDateString();
-
-        if ($habit->logs()->where('occurrence_date', $occurrenceDate)->exists()) {
-            throw ValidationException::withMessages([
-                'occurrence_date' => ['Ya existe un registro para esa fecha — usa el endpoint de actualización.'],
-            ]);
-        }
-
-        $log = $habit->logs()->create([
-            'occurrence_date' => $occurrenceDate,
-            'status' => 'pending',
-        ]);
-
-        $this->syncMetrics($log, $request->validated('metrics', []));
-
-        app(HabitCompletionService::class)->evaluate($log);
-        app(StreakService::class)->recalculate($habit);
+        $log = $logs->create($habit, $request->validated('occurrence_date'), $request->validated('metrics', []));
 
         return (new HabitLogResource($log->fresh('metricLogs')))
             ->additional(['mensaje' => 'Registro creado correctamente.'])
@@ -75,43 +64,30 @@ class HabitLogController extends Controller
             ->setStatusCode(201);
     }
 
-    public function update(UpdateHabitLogRequest $request, Habit $habit, HabitLog $log)
+    public function update(UpdateHabitLogRequest $request, Habit $habit, HabitLog $log, HabitLogService $logs)
     {
         $this->authorize('update', $habit);
 
-        $this->syncMetrics($log, $request->validated('metrics', []));
-
-        app(HabitCompletionService::class)->evaluate($log);
-        app(StreakService::class)->recalculate($habit);
+        $logs->update($habit, $log, $request->validated('metrics', []));
 
         return (new HabitLogResource($log->fresh('metricLogs')))
             ->additional(['mensaje' => 'Registro actualizado correctamente.']);
     }
 
-    public function destroy(Habit $habit, HabitLog $log)
+    /**
+     * Deshacer el registro de hoy. En `fixed` la ocurrencia vuelve a
+     * `pending` y se devuelve en `data`; en `quota` se borra y `data` es
+     * null (ver HabitLogService::undo()).
+     */
+    public function destroy(Habit $habit, HabitLog $log, HabitLogService $logs)
     {
         $this->authorize('update', $habit);
 
-        $log->delete();
-
-        app(StreakService::class)->recalculate($habit);
+        $result = $logs->undo($habit, $log);
 
         return response()->json([
-            'data' => null,
-            'mensaje' => 'Registro eliminado correctamente.',
+            'data' => $result ? new HabitLogResource($result->fresh('metricLogs')) : null,
+            'mensaje' => 'Registro deshecho correctamente.',
         ]);
-    }
-
-    /**
-     * @param  array<int, array{habit_metric_id: int, value: float}>  $metrics
-     */
-    private function syncMetrics(HabitLog $log, array $metrics): void
-    {
-        foreach ($metrics as $metricInput) {
-            $log->metricLogs()->updateOrCreate(
-                ['habit_metric_id' => $metricInput['habit_metric_id']],
-                ['value' => $metricInput['value']],
-            );
-        }
     }
 }

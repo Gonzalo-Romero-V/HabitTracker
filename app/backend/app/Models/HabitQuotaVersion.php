@@ -17,6 +17,7 @@ class HabitQuotaVersion extends Model
     protected function casts(): array
     {
         return [
+            'quota_target' => 'integer',
             'effective_from' => 'date',
         ];
     }

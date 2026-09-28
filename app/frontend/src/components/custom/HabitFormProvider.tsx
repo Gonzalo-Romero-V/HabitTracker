@@ -260,31 +260,60 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
       return original.name !== m.name || originalGoal !== m.goal;
     });
 
-    await Promise.all([
-      ...toDelete.map((m) => deleteHabitMetric(habitId, m.id)),
-      ...toCreate.map((m) => createHabitMetric(habitId, metricPayload(m))),
-      ...toUpdate.map((m) =>
+    // Borrar al final: el backend no permite dejar un hábito cuantificable
+    // sin métricas, así que reemplazar la única métrica (borrar + crear) en
+    // paralelo podía fallar según qué request llegara primero.
+    await Promise.all(toCreate.map((m) => createHabitMetric(habitId, metricPayload(m))));
+    await Promise.all(
+      toUpdate.map((m) =>
         updateHabitMetric(habitId, m.id as number, {
           name: m.name,
           target_value: toStoredTargetValue(m.metric_type, m.goal),
         }),
       ),
-    ]);
+    );
+    await Promise.all(toDelete.map((m) => deleteHabitMetric(habitId, m.id)));
+  }
+
+  function validationError(): string | null {
+    if (form.recurrenceType === "fixed" && form.days.length === 0) return "Elige al menos un día de la semana.";
+    if (form.recurrenceType === "quota" && (form.timesPerWeek < 1 || form.timesPerWeek > 7)) {
+      return "La cuota semanal debe estar entre 1 y 7 veces.";
+    }
+    if (form.trackingType === "quantifiable" && form.metrics.some((m) => !(m.goal > 0))) {
+      return "La meta de cada métrica debe ser mayor que cero.";
+    }
+    return null;
   }
 
   async function handleSave() {
     setError(null);
+    const invalid = validationError();
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
     setIsSubmitting(true);
 
     try {
       if (editing) {
+        // Solo se mandan los campos de agenda que cambiaron: el backend
+        // versiona la cuota y regenera ocurrencias futuras al recibirlos
+        // (ver decisions/architecture.md → Versionado de metas).
+        const newRule = form.recurrenceType === "fixed" ? buildRecurrenceRule(form.days) : null;
+        const quotaChanged = form.recurrenceType === "quota" && form.timesPerWeek !== editing.quota_target;
+        const duration = durationFields();
+        const durationChanged =
+          duration.duration_type !== editing.duration_type ||
+          (duration.duration_end_date ?? null) !== editing.duration_end_date ||
+          (duration.duration_days ?? null) !== editing.duration_days;
+
         await updateHabit(editing.id, {
           name: form.name,
           category_id: form.categoryId ? Number(form.categoryId) : null,
-          recurrence_rule: form.recurrenceType === "fixed" ? buildRecurrenceRule(form.days) : undefined,
-          quota_target: form.recurrenceType === "quota" ? form.timesPerWeek : undefined,
-          quota_period: form.recurrenceType === "quota" ? "week" : undefined,
-          ...durationFields(),
+          ...(newRule && newRule !== editing.recurrence_rule ? { recurrence_rule: newRule } : {}),
+          ...(quotaChanged ? { quota_target: form.timesPerWeek, quota_period: "week" as const } : {}),
+          ...(durationChanged ? duration : {}),
         });
 
         if (form.trackingType === "quantifiable") {
@@ -447,8 +476,13 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
                         <X className="size-4" />
                       </Button>
                     </div>
+                    {/* Tipo y unidad/moneda son inmutables en una métrica ya
+                        creada (domain/habit-metric.md): el historial ya está
+                        guardado en esa unidad, y el backend solo acepta
+                        cambiar nombre y meta. */}
                     <Select
                       value={metric.metric_type}
+                      disabled={metric.id != null}
                       onValueChange={(v) => updateMetricRow(idx, { metric_type: v as NewMetricInput["metric_type"] })}
                     >
                       <SelectTrigger className="w-full">
@@ -468,6 +502,7 @@ export function HabitFormProvider({ children }: { children: ReactNode }) {
                             metric.metric_type === "currency" ? "Moneda (ISO, ej. USD)" : "Unidad (ej. vasos, páginas)"
                           }
                           className="flex-1"
+                          disabled={metric.id != null}
                           maxLength={metric.metric_type === "currency" ? 3 : undefined}
                           value={metric.unit}
                           onChange={(e) =>

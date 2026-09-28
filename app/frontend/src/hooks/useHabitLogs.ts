@@ -59,6 +59,9 @@ export function updateHabitLog(habitId: number, logId: number, metrics?: MetricV
   });
 }
 
+/** Deshace el registro de hoy. En hábitos `fixed` la ocurrencia programada
+ * no desaparece: vuelve a `pending` y se devuelve el log resultante. En
+ * `quota` se borra y devuelve `null` (ver domain/habit-log.md). */
 export function deleteHabitLog(habitId: number, logId: number) {
-  return apiFetch<null>(`/habits/${habitId}/logs/${logId}`, { method: "DELETE" });
+  return apiFetch<HabitLogEntry | null>(`/habits/${habitId}/logs/${logId}`, { method: "DELETE" });
 }

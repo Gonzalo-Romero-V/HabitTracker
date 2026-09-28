@@ -15,7 +15,8 @@ class CategoryController extends Controller
     {
         $categories = Category::where('user_id', $request->user()->id)
             ->orderBy('name')
-            ->paginate();
+            ->orderBy('id')
+            ->paginate(max(1, min((int) $request->query('per_page', 15), 100)));
 
         return response()->json([
             'data' => CategoryResource::collection($categories)->resolve(),

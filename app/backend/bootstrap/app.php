@@ -23,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'sync.timezone' => SyncClientTimezone::class,
         ]);
+
+        // API pura: un invitado nunca se redirige. Sin esto, un request sin
+        // `Accept: application/json` intentaba redirigir a route('login')
+        // (inexistente) y terminaba en 500 en vez del 401 del contrato.
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // El orden importa: las específicas van antes del catch-all

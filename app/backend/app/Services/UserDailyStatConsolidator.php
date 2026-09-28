@@ -17,7 +17,19 @@ class UserDailyStatConsolidator
 {
     public function consolidate(User $user, string $date): void
     {
-        $counts = $this->countForDate($user, $date);
+        // Día cerrado: cuenta también hábitos archivados después — sus logs
+        // de ese día son historia real. Filtrar por `active` hacía que
+        // archivar un hábito hoy reescribiera el agregado de ayer (este
+        // consolidado se re-ejecuta cada 30 min).
+        $counts = $this->countForDate($user, $date, onlyActiveHabits: false);
+
+        // Sin nada debido ese día no hay fila: "sin dato" (gris) no es "0%"
+        // (ver domain/user-daily-stat.md → Reglas de negocio).
+        if ($counts['due_count'] === 0) {
+            UserDailyStat::where('user_id', $user->id)->whereDate('date', $date)->delete();
+
+            return;
+        }
 
         UserDailyStat::updateOrCreate(
             ['user_id' => $user->id, 'date' => $date],
@@ -31,23 +43,18 @@ class UserDailyStatConsolidator
      *
      * @return array{due_count: int, completed_count: int, weighted_completed_count: float}
      */
-    public function countForDate(User $user, string $date): array
+    public function countForDate(User $user, string $date, bool $onlyActiveHabits = true): array
     {
-        $counts = HabitLog::query()
-            ->whereHas('habit', fn ($q) => $q->where('user_id', $user->id)->where('status', 'active'))
-            ->where('occurrence_date', $date)
-            ->selectRaw("count(*) as due_count, count(*) filter (where status = 'completed') as completed_count")
-            ->first();
-
         $logs = HabitLog::query()
-            ->whereHas('habit', fn ($q) => $q->where('user_id', $user->id)->where('status', 'active'))
+            ->whereHas('habit', fn ($q) => $q->where('user_id', $user->id)
+                ->when($onlyActiveHabits, fn ($q) => $q->where('status', 'active')))
             ->where('occurrence_date', $date)
             ->with(['habit.metrics.targetVersions', 'metricLogs'])
             ->get();
 
         return [
-            'due_count' => (int) ($counts->due_count ?? 0),
-            'completed_count' => (int) ($counts->completed_count ?? 0),
+            'due_count' => $logs->count(),
+            'completed_count' => $logs->where('status', 'completed')->count(),
             'weighted_completed_count' => round((float) $logs->sum(fn ($log) => $this->completionRatio($log, $date)), 4),
         ];
     }

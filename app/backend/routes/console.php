@@ -8,9 +8,12 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Ver decisions/architecture.md → Jobs. Diario para materializar (evalúa
-// internamente si "hoy" es fin de mes en el timezone de cada usuario);
-// frecuente para cerrar ocurrencias vencidas y recalcular streaks.
-Schedule::command('habits:materialize-month')->dailyAt('23:50');
-Schedule::command('habits:evaluate-closures')->everyThirtyMinutes();
-Schedule::command('habits:dispatch-due-reminders')->everyMinute();
+// Ver decisions/architecture.md → Jobs. Todos son idempotentes y se
+// recuperan solos si el servidor estuvo apagado. materialize-month corre
+// cada hora (no una vez al día): el servidor es una máquina que no está
+// encendida 24/7, y un único horario fijo podía perderse justo el último
+// día o el día 1 del mes. withoutOverlapping evita que una corrida lenta
+// se solape con la siguiente.
+Schedule::command('habits:materialize-month')->hourly()->withoutOverlapping();
+Schedule::command('habits:evaluate-closures')->everyThirtyMinutes()->withoutOverlapping();
+Schedule::command('habits:dispatch-due-reminders')->everyMinute()->withoutOverlapping();

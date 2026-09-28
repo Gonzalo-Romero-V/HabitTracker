@@ -20,6 +20,7 @@ class Habit extends Model
         'duration_type',
         'duration_end_date',
         'duration_days',
+        'reactivated_on',
         'current_streak',
         'best_streak',
     ];
@@ -28,6 +29,7 @@ class Habit extends Model
     {
         return [
             'duration_end_date' => 'date',
+            'reactivated_on' => 'date',
         ];
     }
 
@@ -81,7 +83,7 @@ class Habit extends Model
 
     public function currentQuotaVersion(): ?HabitQuotaVersion
     {
-        return $this->quotaVersions()->orderByDesc('effective_from')->first();
+        return $this->quotaVersions()->orderByDesc('effective_from')->orderByDesc('id')->first();
     }
 
     /**
@@ -93,21 +95,50 @@ class Habit extends Model
         return $this->quotaVersions()
             ->whereDate('effective_from', '<=', $date)
             ->orderByDesc('effective_from')
+            ->orderByDesc('id')
             ->first();
     }
 
     /**
-     * Fecha (inclusive, string Y-m-d) en que este hábito deja de estar
-     * vigente — null si `indefinite` (nunca vence). Para `duration_days`,
-     * se cuenta en días de calendario desde la fecha de creación del
-     * hábito **en el timezone de su usuario dueño**, nunca UTC (mismo
-     * principio que el resto del modelo, ver domain/habit.md). Se opera
-     * siempre sobre `->toDateString()` (nunca sobre el objeto Carbon con
-     * instante) para evitar el gotcha documentado en decisions/
-     * architecture.md — `CarbonImmutable::parse($valor, $tz)` ignora $tz
-     * cuando $valor ya es un Carbon con timezone propio. Usada por
-     * HabitOccurrenceMaterializer (no generar ocurrencias más allá de esta
-     * fecha) y por el job de cierres (auto-archivar al vencer).
+     * Registra una nueva versión de la cuota vigente desde `$effectiveFrom`
+     * (ver decisions/architecture.md → Versionado de metas). No inserta si
+     * el valor no cambió, y si ya existe una versión con esa misma fecha la
+     * reemplaza — dos filas con el mismo `effective_from` harían ambiguo
+     * cuál está vigente ese día.
+     */
+    public function recordQuotaVersion(int $target, string $period, string $effectiveFrom): void
+    {
+        $current = $this->currentQuotaVersion();
+        if ($current && $current->quota_target === $target && $current->quota_period === $period) {
+            return;
+        }
+
+        $this->quotaVersions()->updateOrCreate(
+            ['effective_from' => $effectiveFrom],
+            ['quota_target' => $target, 'quota_period' => $period],
+        );
+    }
+
+    /**
+     * Fecha de calendario (Y-m-d) en que se creó el hábito, en el timezone
+     * de su usuario dueño — nunca la fecha UTC de `created_at`. Se opera
+     * con `setTimezone()` explícito, nunca `parse($valor, $tz)` (gotcha
+     * documentado en decisions/architecture.md).
+     */
+    public function createdDateInUserTz(): string
+    {
+        return CarbonImmutable::parse($this->created_at)
+            ->setTimezone($this->user->timezone)
+            ->toDateString();
+    }
+
+    /**
+     * Fecha (inclusive, string Y-m-d) del último día en que este hábito
+     * está vigente — null si `indefinite` (nunca vence). Para
+     * `duration_days = N`, son N días de calendario contando el día de
+     * creación (en el timezone del usuario): último día = creación + N - 1.
+     * Usada por HabitOccurrenceMaterializer (no generar ocurrencias más allá
+     * de esta fecha) y por el job de cierres (auto-archivar al vencer).
      */
     public function effectiveEndDate(): ?string
     {
@@ -116,11 +147,9 @@ class Habit extends Model
         }
 
         if ($this->duration_type === 'duration_days' && $this->duration_days) {
-            $createdDateInUserTz = CarbonImmutable::parse($this->created_at)
-                ->setTimezone($this->user->timezone)
+            return CarbonImmutable::parse($this->createdDateInUserTz())
+                ->addDays($this->duration_days - 1)
                 ->toDateString();
-
-            return CarbonImmutable::parse($createdDateInUserTz)->addDays($this->duration_days)->toDateString();
         }
 
         return null;

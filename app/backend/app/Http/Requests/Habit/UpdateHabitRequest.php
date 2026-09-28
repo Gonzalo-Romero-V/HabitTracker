@@ -32,12 +32,29 @@ class UpdateHabitRequest extends FormRequest
             // quota_target/target_value) — la próxima corrida del job
             // mensual ya usa el valor nuevo, el historial de HabitLog ya
             // generado queda intacto.
-            'recurrence_rule' => ['sometimes', 'string', new ValidRecurrenceRule],
+            'recurrence_rule' => [
+                'sometimes',
+                Rule::prohibitedIf(fn () => $this->route('habit')->recurrence_type !== 'fixed'),
+                'string',
+                new ValidRecurrenceRule,
+            ],
             // quota_target/quota_period: si vienen, inserta una nueva
             // versión (ver architecture.md → Versionado de metas). Ambos
             // se exigen juntos para no dejar una versión a medias.
-            'quota_target' => ['sometimes', 'required_with:quota_period', 'integer', 'min:1'],
-            'quota_period' => ['sometimes', 'required_with:quota_target', Rule::in(['week'])],
+            'quota_target' => [
+                'sometimes',
+                Rule::prohibitedIf(fn () => $this->route('habit')->recurrence_type !== 'quota'),
+                'required_with:quota_period',
+                'integer',
+                'min:1',
+                'max:7',
+            ],
+            'quota_period' => [
+                'sometimes',
+                Rule::prohibitedIf(fn () => $this->route('habit')->recurrence_type !== 'quota'),
+                'required_with:quota_target',
+                Rule::in(['week']),
+            ],
 
             // Vigencia — editable en cualquier momento (a diferencia de
             // tracking_type/recurrence_type): no versiona, el cambio aplica
@@ -46,8 +63,11 @@ class UpdateHabitRequest extends FormRequest
             'duration_end_date' => [
                 'required_if:duration_type,end_date',
                 'prohibited_unless:duration_type,end_date',
-                'date',
-                'after:today',
+                'date_format:Y-m-d',
+                // after_or_equal (no after): un hábito que vence hoy sigue
+                // vigente hoy, y reenviar su misma fecha al editar otro
+                // campo no debe dar 422.
+                'after_or_equal:'.$this->user()->today(),
             ],
             'duration_days' => [
                 'required_if:duration_type,duration_days',

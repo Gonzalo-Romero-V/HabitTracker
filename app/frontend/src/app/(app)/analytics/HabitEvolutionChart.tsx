@@ -180,7 +180,7 @@ function MetricEvolutionMiniChart({ metric, logs }: { metric: HabitMetric; logs:
 
 type HabitEvolutionChartProps = {
   habits: Habit[];
-  /** Logs (hasta 30, más recientes) por hábito, ya cargados por la página
+  /** Logs de los últimos 30 días por hábito, ya cargados por la página
    * padre para la sección "Consistencia por hábito" — se reutilizan acá
    * para la vista Mensual en vez de volver a pedirlos. */
   logsByHabit: Record<number, HabitLogEntry[]>;
@@ -197,7 +197,7 @@ type HabitEvolutionChartProps = {
  * donde no hay ninguna métrica que graficar como línea — ahí sí
  * completado/fallado es el único dato que existe:
  *
- * Mensual: un punto por log (hasta los últimos 30), valor 100 si
+ * Mensual: un punto por log de los últimos 30 días, valor 100 si
  * `completed`, 0 si `missed` o `pending` — mapeo documentado acá porque el
  * enunciado deja el mapeo exacto a criterio. Para que "missed" y "pending"
  * (ambos valor 0) sigan siendo distinguibles visualmente, se dibuja una
@@ -335,7 +335,7 @@ export function HabitEvolutionChart({ habits, logsByHabit }: HabitEvolutionChart
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Últimos {monthlyLogs.length} registros del hábito (no es una ventana calendario estricta de 30 días).
+              Registros de los últimos 30 días ({monthlyLogs.length}).
             </p>
           </div>
         )

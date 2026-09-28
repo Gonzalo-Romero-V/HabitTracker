@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { apiFetch, setStoredToken, getStoredToken } from "@/lib/api";
+import { unregisterCurrentDeviceToken } from "@/hooks/useDeviceTokens";
 
 export type AuthUser = {
   id: number;
@@ -80,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     try {
+      await unregisterCurrentDeviceToken();
       await apiFetch("/auth/logout", { method: "POST" });
     } finally {
       setStoredToken(null);

@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Habit;
 use App\Models\HabitLog;
 use App\Models\User;
+use App\Services\HabitLifecycleService;
 use App\Services\StreakService;
 use App\Services\UserDailyStatConsolidator;
 use Carbon\CarbonImmutable;
@@ -19,7 +20,7 @@ use Illuminate\Console\Command;
  *      StreakService ya solo evalúa semanas completamente cerradas, así
  *      que re-correr esto de más es seguro (idempotente), simplemente no
  *      encuentra semanas nuevas que cerrar.
- *   3. Consolida user_daily_stats de "ayer" (en timezone de cada
+ *   3. Consolida user_daily_stats de los últimos 7 días cerrados (en timezone de cada
  *      usuario) — ver domain/user-daily-stat.md. Idempotente (upsert).
  *   4. Auto-archiva hábitos cuya vigencia (duration_type end_date/
  *      duration_days) ya venció — reusa el estado `archived` existente
@@ -34,14 +35,20 @@ class EvaluateHabitClosures extends Command
 
     protected $description = 'Marca ocurrencias fixed vencidas como missed, recalcula streaks y consolida stats diarios';
 
-    public function handle(StreakService $streaks, UserDailyStatConsolidator $dailyStats): int
+    public function handle(
+        StreakService $streaks,
+        UserDailyStatConsolidator $dailyStats,
+        HabitLifecycleService $lifecycle,
+    ): int
     {
         $missedCount = 0;
         $affectedFixedHabits = [];
 
         HabitLog::query()
             ->where('status', 'pending')
-            ->whereHas('habit', fn ($q) => $q->where('recurrence_type', 'fixed'))
+            // Solo hábitos activos: el hueco de un hábito archivado es
+            // neutro (HabitLifecycleService), nunca genera `missed`.
+            ->whereHas('habit', fn ($q) => $q->where('recurrence_type', 'fixed')->where('status', 'active'))
             ->with('habit.user')
             ->chunkById(200, function ($logs) use (&$missedCount, &$affectedFixedHabits) {
                 foreach ($logs as $log) {
@@ -74,8 +81,14 @@ class EvaluateHabitClosures extends Command
         $usersProcessed = 0;
         User::query()->chunkById(200, function ($users) use ($dailyStats, &$usersProcessed) {
             foreach ($users as $user) {
-                $yesterday = CarbonImmutable::now($user->timezone)->subDay()->toDateString();
-                $dailyStats->consolidate($user, $yesterday);
+                // Últimos 7 días cerrados, no solo "ayer": si el servidor
+                // estuvo apagado un día entero, el hueco se recupera en la
+                // siguiente corrida (idempotente). Huecos más viejos:
+                // `php artisan habits:rebuild-stats`.
+                $today = CarbonImmutable::parse($user->today());
+                for ($daysAgo = 1; $daysAgo <= 7; $daysAgo++) {
+                    $dailyStats->consolidate($user, $today->subDays($daysAgo)->toDateString());
+                }
                 $usersProcessed++;
             }
         });
@@ -85,13 +98,13 @@ class EvaluateHabitClosures extends Command
             ->where('status', 'active')
             ->where('duration_type', '!=', 'indefinite')
             ->with('user')
-            ->chunkById(200, function ($habits) use (&$expiredCount) {
+            ->chunkById(200, function ($habits) use ($lifecycle, &$expiredCount) {
                 foreach ($habits as $habit) {
                     $effectiveEndDate = $habit->effectiveEndDate();
                     $todayInTz = CarbonImmutable::now($habit->user->timezone)->toDateString();
 
                     if ($effectiveEndDate !== null && $effectiveEndDate < $todayInTz) {
-                        $habit->update(['status' => 'archived']);
+                        $lifecycle->archive($habit);
                         $expiredCount++;
                     }
                 }

@@ -17,7 +17,11 @@ class RecurrenceExpansionService
      */
     public function occurrencesBetween(Habit $habit, CarbonImmutable $start, CarbonImmutable $end): array
     {
-        $rrule = new RRule($habit->recurrence_rule, $habit->created_at->toDateString());
+        // DTSTART = día de creación en el timezone del usuario, nunca la
+        // fecha UTC de created_at: un hábito creado de noche en
+        // America/Guayaquil ya es "mañana" en UTC, y la regla excluía el
+        // propio día de creación.
+        $rrule = new RRule($habit->recurrence_rule, $habit->createdDateInUserTz());
 
         // Se pasan strings "Y-m-d" a propósito, no objetos DateTime con
         // timezone real: la librería ancla sus ocurrencias en el timezone
@@ -36,5 +40,13 @@ class RecurrenceExpansionService
             fn ($date) => CarbonImmutable::parse($date->format('Y-m-d')),
             $occurrences
         );
+    }
+
+    /** ¿`$date` (Y-m-d) es una ocurrencia programada de este hábito `fixed`? */
+    public function isOccurrence(Habit $habit, string $date): bool
+    {
+        $day = CarbonImmutable::parse($date);
+
+        return $this->occurrencesBetween($habit, $day, $day) !== [];
     }
 }

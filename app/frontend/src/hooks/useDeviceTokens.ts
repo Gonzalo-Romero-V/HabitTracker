@@ -14,10 +14,32 @@ export type NewDeviceTokenInput = {
  * domain/device-token.md → Notas de implementación), así que llamarla de
  * más (ej. en cada arranque de la app) no duplica filas. */
 export function registerDeviceToken(input: NewDeviceTokenInput) {
-  return apiFetch<null>("/device-tokens", {
+  return apiFetch<{ id: number }>("/device-tokens", {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+/** id del DeviceToken registrado por ESTE dispositivo — se guarda para poder
+ * borrarlo al cerrar sesión (ver domain/device-token.md: el token se elimina
+ * cuando el usuario cierra sesión en ese dispositivo; si no, seguiría
+ * recibiendo los recordatorios de la cuenta que ya salió). */
+const DEVICE_TOKEN_ID_KEY = "habit_tracker_device_token_id";
+
+/** Borra el token push de este dispositivo, si hay uno. Nunca lanza: debe
+ * llamarse ANTES de revocar el token de sesión y no bloquear el logout. */
+export async function unregisterCurrentDeviceToken(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const id = localStorage.getItem(DEVICE_TOKEN_ID_KEY);
+  if (!id) return;
+
+  try {
+    await apiFetch<null>(`/device-tokens/${id}`, { method: "DELETE" });
+  } catch (error) {
+    console.warn("No se pudo eliminar el token de push.", error);
+  } finally {
+    localStorage.removeItem(DEVICE_TOKEN_ID_KEY);
+  }
 }
 
 /**
@@ -53,7 +75,8 @@ export async function registerNativePushToken(): Promise<void> {
     }
 
     const { token } = await FirebaseMessaging.getToken();
-    await registerDeviceToken({ push_token: token, platform: "android" });
+    const registered = await registerDeviceToken({ push_token: token, platform: "android" });
+    localStorage.setItem(DEVICE_TOKEN_ID_KEY, String(registered.id));
   } catch (error) {
     // Falla silenciosa a propósito: registrar el push token nunca debe
     // impedir que el usuario siga usando la app.

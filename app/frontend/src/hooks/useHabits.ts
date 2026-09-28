@@ -1,6 +1,6 @@
 "use client";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiFetchAllPages } from "@/lib/api";
 
 export type HabitMetricTargetVersion = {
   target_value: string;
@@ -83,7 +83,7 @@ export type NewHabitInput = {
 export function listHabits(status?: string) {
   const query = status ? `?status=${status}` : "";
 
-  return apiFetch<Habit[]>(`/habits${query}`, { method: "GET" });
+  return apiFetchAllPages<Habit>(`/habits${query}`);
 }
 
 export function getHabit(id: number) {

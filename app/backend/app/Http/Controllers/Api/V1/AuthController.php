@@ -86,7 +86,13 @@ class AuthController extends Controller
             config('services.google.client_id_android'),
         ]);
 
-        if (! $payload || ! in_array($payload['aud'] ?? null, $allowedClientIds, true)) {
+        // email_verified es obligatorio: la vinculación automática por email
+        // (domain/user.md) se apoya en que Google ya verificó ese correo.
+        if (
+            ! $payload
+            || ! in_array($payload['aud'] ?? null, $allowedClientIds, true)
+            || ! filter_var($payload['email_verified'] ?? false, FILTER_VALIDATE_BOOLEAN)
+        ) {
             throw ValidationException::withMessages([
                 'id_token' => ['El token de Google no es válido.'],
             ]);

@@ -22,7 +22,7 @@ class StoreHabitMetricRequest extends FormRequest
             'metric_type' => ['required', Rule::in(['count', 'duration', 'currency'])],
             'unit' => ['nullable', 'string', 'max:50'],
             'currency_code' => ['nullable', 'string', 'size:3'],
-            'target_value' => ['required', 'numeric', 'min:0'],
+            'target_value' => ['required', 'numeric', 'gt:0'],
         ];
     }
 }

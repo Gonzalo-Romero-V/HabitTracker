@@ -7,11 +7,12 @@ use App\Http\Requests\Habit\StoreHabitRequest;
 use App\Http\Requests\Habit\UpdateHabitRequest;
 use App\Http\Resources\HabitResource;
 use App\Models\Habit;
+use App\Services\HabitLifecycleService;
 use App\Services\HabitOccurrenceMaterializer;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class HabitController extends Controller
 {
@@ -21,7 +22,11 @@ class HabitController extends Controller
             ->where('user_id', $request->user()->id)
             ->when($request->query('status'), fn ($query, $status) => $query->where('status', $status))
             ->with(['metrics.targetVersions', 'user'])
-            ->paginate();
+            // Orden estable obligatorio: sin ORDER BY, Postgres devuelve las
+            // filas en orden físico, que cambia tras cada UPDATE (ej. el
+            // recálculo de racha) — un hábito podía saltar entre páginas.
+            ->orderBy('id')
+            ->paginate(max(1, min((int) $request->query('per_page', 15), 100)));
 
         return response()->json([
             'data' => HabitResource::collection($habits->items()),
@@ -36,9 +41,12 @@ class HabitController extends Controller
 
     public function store(StoreHabitRequest $request)
     {
-        $timezone = $request->user()->timezone;
+        // "Hoy" del usuario, nunca Date::today() (UTC del servidor): una
+        // versión de meta creada de noche en America/Guayaquil nacía con
+        // fecha de mañana y el log de hoy no encontraba meta vigente.
+        $today = $request->user()->today();
 
-        $habit = DB::transaction(function () use ($request, $timezone) {
+        $habit = DB::transaction(function () use ($request, $today) {
             $habit = Habit::create([
                 'user_id' => $request->user()->id,
                 'category_id' => $request->validated('category_id'),
@@ -52,11 +60,11 @@ class HabitController extends Controller
             ]);
 
             if ($habit->recurrence_type === 'quota') {
-                $habit->quotaVersions()->create([
-                    'quota_target' => $request->validated('quota_target'),
-                    'quota_period' => $request->validated('quota_period'),
-                    'effective_from' => Date::today()->toDateString(),
-                ]);
+                $habit->recordQuotaVersion(
+                    (int) $request->validated('quota_target'),
+                    $request->validated('quota_period'),
+                    $today,
+                );
             }
 
             if ($habit->tracking_type === 'quantifiable') {
@@ -68,17 +76,14 @@ class HabitController extends Controller
                         'currency_code' => $metricInput['currency_code'] ?? null,
                     ]);
 
-                    $metric->targetVersions()->create([
-                        'target_value' => $metricInput['target_value'],
-                        'effective_from' => Date::today()->toDateString(),
-                    ]);
+                    $metric->recordTargetVersion((float) $metricInput['target_value'], $today);
                 }
             }
 
             if ($habit->recurrence_type === 'fixed') {
-                $today = CarbonImmutable::now($timezone);
+                $start = CarbonImmutable::parse($today);
                 app(HabitOccurrenceMaterializer::class)
-                    ->materializeRange($habit, $today, $today->endOfMonth());
+                    ->materializeRange($habit, $start, $start->endOfMonth());
             }
 
             return $habit;
@@ -97,7 +102,7 @@ class HabitController extends Controller
         return new HabitResource($habit->load('metrics.targetVersions'));
     }
 
-    public function update(UpdateHabitRequest $request, Habit $habit)
+    public function update(UpdateHabitRequest $request, Habit $habit, HabitLifecycleService $lifecycle)
     {
         $this->authorize('update', $habit);
 
@@ -114,35 +119,54 @@ class HabitController extends Controller
             $habit->duration_days = $request->validated('duration_days');
         }
 
-        $habit->save();
+        $scheduleChanged = $habit->isDirty(['recurrence_rule', 'duration_type', 'duration_end_date', 'duration_days']);
 
-        if ($request->has('quota_target') && $request->has('quota_period')) {
-            $habit->quotaVersions()->create([
-                'quota_target' => $request->validated('quota_target'),
-                'quota_period' => $request->validated('quota_period'),
-                'effective_from' => Date::today()->toDateString(),
-            ]);
-        }
+        DB::transaction(function () use ($request, $habit, $lifecycle, $scheduleChanged) {
+            $habit->save();
+
+            // Regla o vigencia nuevas afectan solo el futuro (domain/
+            // habit.md): se regeneran las `pending` posteriores a hoy.
+            if ($scheduleChanged) {
+                $lifecycle->rescheduleFuture($habit);
+            }
+
+            if ($request->has('quota_target') && $request->has('quota_period')) {
+                $habit->recordQuotaVersion(
+                    (int) $request->validated('quota_target'),
+                    $request->validated('quota_period'),
+                    $request->user()->today(),
+                );
+            }
+        });
 
         return (new HabitResource($habit->fresh('metrics.targetVersions')))
             ->additional(['mensaje' => 'Hábito actualizado correctamente.']);
     }
 
-    public function archive(Request $request, Habit $habit)
+    public function archive(Request $request, Habit $habit, HabitLifecycleService $lifecycle)
     {
         $this->authorize('update', $habit);
 
-        $habit->update(['status' => 'archived']);
+        $lifecycle->archive($habit);
 
         return (new HabitResource($habit->fresh('metrics.targetVersions')))
             ->additional(['mensaje' => 'Hábito archivado correctamente.']);
     }
 
-    public function unarchive(Request $request, Habit $habit)
+    public function unarchive(Request $request, Habit $habit, HabitLifecycleService $lifecycle)
     {
         $this->authorize('update', $habit);
 
-        $habit->update(['status' => 'active']);
+        // Reactivar un hábito con la vigencia ya vencida duraría solo hasta
+        // la próxima corrida del job de cierres, que lo volvería a archivar.
+        $effectiveEndDate = $habit->effectiveEndDate();
+        if ($effectiveEndDate !== null && $effectiveEndDate < $request->user()->today()) {
+            throw ValidationException::withMessages([
+                'duration_type' => ['La vigencia de este hábito ya terminó — actualízala antes de reactivarlo.'],
+            ]);
+        }
+
+        $lifecycle->unarchive($habit);
 
         return (new HabitResource($habit->fresh('metrics.targetVersions')))
             ->additional(['mensaje' => 'Hábito reactivado correctamente.']);

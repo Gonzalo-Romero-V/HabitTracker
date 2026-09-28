@@ -33,12 +33,21 @@ class StreakService
         $logs = $habit->logs()
             ->whereIn('status', ['completed', 'missed'])
             ->orderBy('occurrence_date')
-            ->get(['status']);
+            ->get(['occurrence_date', 'status']);
 
+        $resetOn = $habit->reactivated_on?->toDateString();
         $running = 0;
         $best = 0;
+        $crossedReset = $resetOn === null;
 
         foreach ($logs as $log) {
+            // Reactivar un hábito archivado reinicia la racha actual (el
+            // hueco archivado no es modo vacaciones, ver intent/vision.md).
+            if (! $crossedReset && $log->occurrence_date->toDateString() >= $resetOn) {
+                $running = 0;
+                $crossedReset = true;
+            }
+
             if ($log->status === 'completed') {
                 $running++;
                 $best = max($best, $running);
@@ -47,55 +56,98 @@ class StreakService
             }
         }
 
+        if (! $crossedReset) {
+            $running = 0;
+        }
+
         return [$running, $best];
     }
 
     /**
+     * Unidad de evaluación: semana ISO en el timezone del usuario (ver
+     * domain/habit-log.md → Streak en `quota`).
+     *
+     * - Semana cerrada: suma si alcanzó la cuota vigente, si no rompe.
+     * - Semana en curso: suma apenas alcanza la cuota; nunca rompe antes de
+     *   cerrar (mismo criterio que `fixed`, donde completar hoy suma ya).
+     * - Semana de creación (o de reactivación): parcial por definición —
+     *   suma si se cumplió, pero no rompe si no.
+     *
      * @return array{0: int, 1: int} [current, best]
      */
     private function calculateQuota(Habit $habit): array
     {
-        $timezone = $habit->user->timezone;
-        $now = CarbonImmutable::now($timezone);
 
-        // occurrence_date es una fecha de calendario pura (columna `date`,
-        // sin hora) — no necesita conversión de timezone, usarla directo.
-        // OJO: CarbonImmutable::parse($valor, $tz) IGNORA $tz cuando
-        // $valor ya es un objeto Carbon con timezone propio (queda en
-        // UTC) — se comprobó con un test real que esto rompía la
-        // comparación de semanas por 5 horas. Por eso created_at sí usa
-        // ->setTimezone() explícito más abajo, nunca parse(..., $tz).
+        // occurrence_date es una fecha de calendario pura (columna `date`) —
+        // no necesita conversión de timezone. created_at sí: se resuelve
+        // con createdDateInUserTz() (setTimezone explícito, nunca
+        // parse($valor, $tz), ver decisions/architecture.md).
         $completedCountsByWeek = [];
         foreach ($habit->logs()->where('status', 'completed')->get(['occurrence_date']) as $log) {
             $key = $log->occurrence_date->format('o-W');
             $completedCountsByWeek[$key] = ($completedCountsByWeek[$key] ?? 0) + 1;
         }
 
-        $cursor = CarbonImmutable::parse($habit->created_at)
-            ->setTimezone($timezone)
-            ->startOfWeek(CarbonImmutable::MONDAY);
-        $currentWeekStart = $now->startOfWeek(CarbonImmutable::MONDAY);
+        $versions = $habit->quotaVersions()
+            ->orderBy('effective_from')
+            ->orderBy('id')
+            ->get(['quota_target', 'effective_from']);
+
+        $cursor = CarbonImmutable::parse($habit->createdDateInUserTz())->startOfWeek(CarbonImmutable::MONDAY);
+        // Todas las semanas se construyen desde strings Y-m-d (mismo
+        // timezone por default), nunca mezclando un instante en el timezone
+        // del usuario con uno en UTC — equalTo()/lte() compararían instantes
+        // desfasados por el offset.
+        $currentWeekStart = CarbonImmutable::parse($habit->user->today())->startOfWeek(CarbonImmutable::MONDAY);
+        $resetWeekStart = $habit->reactivated_on
+            ? CarbonImmutable::parse($habit->reactivated_on->toDateString())->startOfWeek(CarbonImmutable::MONDAY)
+            : null;
 
         $running = 0;
         $best = 0;
+        $isFirstWeek = true;
 
-        while ($cursor->lt($currentWeekStart)) {
-            $target = $habit->quotaVersionEffectiveOn($cursor->toDateString())?->quota_target;
+        while ($cursor->lte($currentWeekStart)) {
+            $isResetWeek = $resetWeekStart !== null && $cursor->equalTo($resetWeekStart);
+            if ($isResetWeek) {
+                $running = 0;
+            }
+
+            $target = $this->quotaTargetForWeek($versions, $cursor);
 
             if ($target !== null) {
                 $count = $completedCountsByWeek[$cursor->format('o-W')] ?? 0;
+                $isPartialWeek = $isFirstWeek || $isResetWeek || $cursor->equalTo($currentWeekStart);
 
                 if ($count >= $target) {
                     $running++;
                     $best = max($best, $running);
-                } else {
+                } elseif (! $isPartialWeek) {
                     $running = 0;
                 }
             }
 
+            $isFirstWeek = false;
             $cursor = $cursor->addWeek();
         }
 
         return [$running, $best];
+    }
+
+    /**
+     * Cuota vigente al inicio de la semana; si la primera versión nació a
+     * mitad de semana (semana de creación), la vigente al final de ella.
+     *
+     * @param  \Illuminate\Support\Collection<int, \App\Models\HabitQuotaVersion>  $versions  ascendente por effective_from
+     */
+    private function quotaTargetForWeek($versions, CarbonImmutable $weekStart): ?int
+    {
+        $weekStartDate = $weekStart->toDateString();
+        $weekEndDate = $weekStart->addDays(6)->toDateString();
+
+        $atStart = $versions->last(fn ($v) => $v->effective_from->toDateString() <= $weekStartDate);
+        $version = $atStart ?? $versions->last(fn ($v) => $v->effective_from->toDateString() <= $weekEndDate);
+
+        return $version?->quota_target;
     }
 }

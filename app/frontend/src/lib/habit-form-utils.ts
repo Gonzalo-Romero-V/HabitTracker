@@ -39,13 +39,13 @@ export const METRIC_TYPE_INFO: Record<
   },
   duration: {
     label: "Duración",
-    help: "Tiempo. Ingresá la meta en minutos — se guarda internamente en segundos.",
+    help: "Tiempo. Ingresa la meta en minutos — se guarda internamente en segundos.",
     targetLabel: "Meta (minutos)",
     targetPlaceholder: "30",
   },
   currency: {
     label: "Monto",
-    help: "Dinero. Ingresá la meta en la unidad de tu moneda (ej. dólares) — se guarda en centavos.",
+    help: "Dinero. Ingresa la meta en la unidad de tu moneda (ej. dólares) — se guarda en centavos.",
     targetLabel: "Meta (monto)",
     targetPlaceholder: "20.00",
   },

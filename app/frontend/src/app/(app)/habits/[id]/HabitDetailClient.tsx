@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Pencil } from "lucide-react";
-import { getHabit, type Habit } from "@/hooks/useHabits";
+import { getHabit, type Habit, type HabitMetric } from "@/hooks/useHabits";
 import {
   listHabitLogs,
   updateHabitLog,
@@ -14,6 +14,7 @@ import {
 } from "@/hooks/useHabitLogs";
 import { useHabitForm } from "@/components/custom/HabitFormProvider";
 import { ApiError } from "@/lib/api";
+import { fromStoredTargetValue, toStoredTargetValue } from "@/lib/habit-form-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,8 +117,7 @@ export function HabitDetailClient() {
     setError(null);
     setIsSaving(true);
     try {
-      await deleteHabitLog(habitId, todayLog.id);
-      applyLogChange(null);
+      applyLogChange(await deleteHabitLog(habitId, todayLog.id));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo deshacer.");
     } finally {
@@ -129,11 +129,11 @@ export function HabitDetailClient() {
     if (!habit) return;
     setError(null);
     setIsSaving(true);
+    // `metricValues` está en unidad natural (minutos, monto) igual que en
+    // "Hoy" — se convierte a unidad cruda (segundos/centavos) recién acá.
     const metrics = habit.metrics.map((m) => ({
       habit_metric_id: m.id,
-      value:
-        metricValues[m.id] ??
-        Number(todayLog?.metrics.find((tm) => tm.habit_metric_id === m.id)?.value ?? 0),
+      value: toStoredTargetValue(m.metric_type, naturalValue(m)),
     }));
     try {
       if (todayLog) {
@@ -146,6 +146,18 @@ export function HabitDetailClient() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function naturalValue(metric: HabitMetric): number {
+    if (metricValues[metric.id] !== undefined) return metricValues[metric.id];
+    const raw = Number(todayLog?.metrics.find((m) => m.habit_metric_id === metric.id)?.value ?? 0);
+    return fromStoredTargetValue(metric.metric_type, raw);
+  }
+
+  function unitLabel(metric: HabitMetric): string | null {
+    if (metric.metric_type === "duration") return "min";
+    if (metric.metric_type === "currency") return metric.currency_code;
+    return metric.unit;
   }
 
   if (isLoading || !habit) {
@@ -195,16 +207,14 @@ export function HabitDetailClient() {
               {habit.metrics.map((metric) => (
                 <div key={metric.id} className="flex flex-col gap-1">
                   <Label className="text-xs text-muted-foreground">
-                    {metric.name} (meta: {metric.target_value}
-                    {metric.unit ? ` ${metric.unit}` : ""})
+                    {metric.name} (meta: {fromStoredTargetValue(metric.metric_type, Number(metric.target_value ?? 0))}
+                    {unitLabel(metric) ? ` ${unitLabel(metric)}` : ""})
                   </Label>
                   <Input
                     type="number"
                     min={0}
-                    value={
-                      metricValues[metric.id] ??
-                      Number(todayLog?.metrics.find((m) => m.habit_metric_id === metric.id)?.value ?? 0)
-                    }
+                    step={metric.metric_type === "currency" ? "0.01" : "1"}
+                    value={naturalValue(metric)}
                     onChange={(e) => setMetricValues((prev) => ({ ...prev, [metric.id]: Number(e.target.value) }))}
                   />
                 </div>

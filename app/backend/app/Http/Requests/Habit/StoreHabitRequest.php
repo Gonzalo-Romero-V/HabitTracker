@@ -37,11 +37,14 @@ class StoreHabitRequest extends FormRequest
             ],
 
             // Solo aplica si recurrence_type = quota.
+            // Máximo 7: un hábito `quota` admite un solo HabitLog por día
+            // (domain/habit-log.md), así que más de 7 por semana es inalcanzable.
             'quota_target' => [
                 'required_if:recurrence_type,quota',
                 'prohibited_unless:recurrence_type,quota',
                 'integer',
                 'min:1',
+                'max:7',
             ],
             'quota_period' => [
                 'required_if:recurrence_type,quota',
@@ -54,8 +57,9 @@ class StoreHabitRequest extends FormRequest
             'duration_end_date' => [
                 'required_if:duration_type,end_date',
                 'prohibited_unless:duration_type,end_date',
-                'date',
-                'after:today',
+                'date_format:Y-m-d',
+                // "Hoy" del usuario, no del servidor (UTC).
+                'after:'.$this->user()->today(),
             ],
             'duration_days' => [
                 'required_if:duration_type,duration_days',
@@ -75,7 +79,10 @@ class StoreHabitRequest extends FormRequest
             'metrics.*.metric_type' => ['required_with:metrics', Rule::in(['count', 'duration', 'currency'])],
             'metrics.*.unit' => ['nullable', 'string', 'max:50'],
             'metrics.*.currency_code' => ['nullable', 'string', 'size:3'],
-            'metrics.*.target_value' => ['required_with:metrics', 'numeric', 'min:0'],
+            // Meta estrictamente positiva: con 0 la métrica quedaba "cumplida"
+            // sin registrar nada, y el índice fraccionario del heatmap la
+            // contaba como 0% (división por cero evitada con 0).
+            'metrics.*.target_value' => ['required_with:metrics', 'numeric', 'gt:0'],
         ];
     }
 }

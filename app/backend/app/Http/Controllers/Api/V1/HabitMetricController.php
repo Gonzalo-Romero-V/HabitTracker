@@ -8,7 +8,7 @@ use App\Http\Requests\Habit\UpdateHabitMetricRequest;
 use App\Http\Resources\HabitMetricResource;
 use App\Models\Habit;
 use App\Models\HabitMetric;
-use Illuminate\Support\Facades\Date;
+use Illuminate\Validation\ValidationException;
 
 class HabitMetricController extends Controller
 {
@@ -23,10 +23,7 @@ class HabitMetricController extends Controller
             'currency_code' => $request->validated('currency_code'),
         ]);
 
-        $metric->targetVersions()->create([
-            'target_value' => $request->validated('target_value'),
-            'effective_from' => Date::today()->toDateString(),
-        ]);
+        $metric->recordTargetVersion((float) $request->validated('target_value'), $request->user()->today());
 
         return (new HabitMetricResource($metric))
             ->additional(['mensaje' => 'Métrica agregada correctamente.'])
@@ -43,10 +40,7 @@ class HabitMetricController extends Controller
         }
 
         if ($request->has('target_value')) {
-            $metric->targetVersions()->create([
-                'target_value' => $request->validated('target_value'),
-                'effective_from' => Date::today()->toDateString(),
-            ]);
+            $metric->recordTargetVersion((float) $request->validated('target_value'), $request->user()->today());
         }
 
         return (new HabitMetricResource($metric->fresh()))
@@ -56,6 +50,14 @@ class HabitMetricController extends Controller
     public function destroy(Habit $habit, HabitMetric $metric)
     {
         $this->authorize('update', $habit);
+
+        // Un hábito `quantifiable` siempre tiene al menos una métrica
+        // (domain/habit.md) — sin ninguna, no habría meta que evaluar.
+        if ($habit->metrics()->count() <= 1) {
+            throw ValidationException::withMessages([
+                'metric' => ['Un hábito cuantificable necesita al menos una métrica.'],
+            ]);
+        }
 
         $metric->delete();
 

@@ -49,4 +49,21 @@ class HabitOccurrenceMaterializer
 
         return $created;
     }
+
+    /**
+     * Red de seguridad: garantiza la ocurrencia `pending` de HOY de un
+     * hábito `fixed` activo, sin depender de que el job mensual haya
+     * corrido (si el scheduler estuvo caído, el mes quedaba sin filas y
+     * "Hoy" dejaba de mostrar el hábito). Idempotente y acotada a hoy: los
+     * días pasados sin fila quedan neutros, nunca se rellenan.
+     */
+    public function ensureToday(Habit $habit): void
+    {
+        if ($habit->status !== 'active' || $habit->recurrence_type !== 'fixed') {
+            return;
+        }
+
+        $today = CarbonImmutable::parse($habit->user->today());
+        $this->materializeRange($habit, $today, $today);
+    }
 }

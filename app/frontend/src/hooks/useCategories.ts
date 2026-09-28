@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, apiFetchAllPages, ApiError } from "@/lib/api";
 
 export type Category = {
   id: number;
@@ -34,7 +34,7 @@ export function useCategories(): UseCategoriesResult {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<Category[]>("/categories");
+      const data = await apiFetchAllPages<Category>("/categories");
       setCategories(data);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudieron cargar las categorías.");

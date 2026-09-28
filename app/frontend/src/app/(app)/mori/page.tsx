@@ -39,6 +39,23 @@ function buildWeekMap(stats: DailyStat[]): Map<string, { due: number; completed:
   return map;
 }
 
+/** Días por request — el backend rechaza rangos de más de 2 años (730 días,
+ * ver decisions/api-contracts.md), así que el historial completo de la
+ * vista global se pide en ventanas consecutivas. */
+const MAX_DAYS_PER_REQUEST = 730;
+
+async function getDailyStatsChunked(from: string, to: string): Promise<DailyStat[]> {
+  const end = parseDateOnly(to);
+  const requests: Promise<DailyStat[]>[] = [];
+
+  for (let start = parseDateOnly(from); start <= end; start = addDays(start, MAX_DAYS_PER_REQUEST + 1)) {
+    const chunkEnd = addDays(start, MAX_DAYS_PER_REQUEST);
+    requests.push(getDailyStats(formatDateOnly(start), formatDateOnly(chunkEnd < end ? chunkEnd : end)));
+  }
+
+  return (await Promise.all(requests)).flat();
+}
+
 export default function MoriPage() {
   const { user } = useAuth();
   const [view, setView] = useState<ViewMode>("global");
@@ -80,15 +97,9 @@ export default function MoriPage() {
 
     setIsLoading(true);
     setError(null);
-    getDailyStats(from, to)
+    getDailyStatsChunked(from, to)
       .then(setStats)
-      .catch((err) =>
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "No se pudieron cargar las estadísticas. Si tu cuenta tiene más de 2 años, este rango todavía no soporta consultarse de una sola vez.",
-        ),
-      )
+      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las estadísticas."))
       .finally(() => setIsLoading(false));
   }, [view, firstLogChecked, firstLogDate]);
 

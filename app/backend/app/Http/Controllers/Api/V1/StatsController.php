@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Stats\DailyStatsRequest;
 use App\Http\Resources\UserDailyStatResource;
+use App\Models\Habit;
 use App\Models\HabitLog;
 use App\Models\HabitMonthlyStat;
 use App\Models\UserDailyStat;
+use App\Services\HabitOccurrenceMaterializer;
 use App\Services\UserDailyStatConsolidator;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -18,10 +20,23 @@ class StatsController extends Controller
      * Cuenta en vivo de hoy — nunca cacheada, el día en curso no tiene
      * fila en user_daily_stats (ver domain/user-daily-stat.md).
      */
-    public function today(Request $request, UserDailyStatConsolidator $consolidator)
-    {
+    public function today(
+        Request $request,
+        UserDailyStatConsolidator $consolidator,
+        HabitOccurrenceMaterializer $materializer,
+    ) {
         $user = $request->user();
-        $today = CarbonImmutable::now($user->timezone)->toDateString();
+        $today = $user->today();
+
+        // El conteo de "debidos" depende de que existan las filas de hoy —
+        // no confiar solo en el job mensual (ver ensureToday()).
+        Habit::query()
+            ->where('user_id', $user->id)
+            ->where('status', 'active')
+            ->where('recurrence_type', 'fixed')
+            ->with('user')
+            ->get()
+            ->each(fn (Habit $habit) => $materializer->ensureToday($habit));
         $counts = $consolidator->countForDate($user, $today);
 
         return response()->json([

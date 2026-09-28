@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listHabits, type Habit } from "@/hooks/useHabits";
+import { getHabit, listHabits, type Habit } from "@/hooks/useHabits";
 import { listHabitLogs, type HabitLogEntry } from "@/hooks/useHabitLogs";
 import { listReminders } from "@/hooks/useReminders";
 import { useCategories } from "@/hooks/useCategories";
@@ -136,6 +136,11 @@ export default function TodayPage() {
     );
     getTodayStat()
       .then(setStat)
+      .catch(() => {});
+    // La racha la recalcula el backend en cada registro — se refresca el
+    // hábito en segundo plano para que la insignia no quede desactualizada.
+    getHabit(habitId)
+      .then((habit) => setEntries((prev) => prev.map((entry) => (entry.habit.id === habitId ? { ...entry, habit } : entry))))
       .catch(() => {});
   }, []);
 
