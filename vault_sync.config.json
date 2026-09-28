@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "project_name": "Habit Tracker",
-  "vault_path": "C:/Users/Gonzalo/Dev/Habit Tracker/vault",
+  "vault_path": "vault",
   "extractor": "nextjs-laravel",
   "hierarchy_mapping": {
     "H1_intent": [

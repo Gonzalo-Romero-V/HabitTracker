@@ -47,6 +47,8 @@ def load_config(project_root: Path) -> Config:
         raise ValueError(f"Config missing keys: {sorted(missing)}")
 
     vault = Path(raw["vault_path"])
+    if not vault.is_absolute():
+        vault = project_root / vault
     if not vault.exists():
         raise FileNotFoundError(f"Vault path does not exist: {vault}")
 
